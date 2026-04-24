@@ -1,0 +1,35 @@
+{
+	"tool":	"memscope",
+	"version":	"1.0.0",
+	"scan_time":	"2026-04-24T17:07:42Z",
+	"image_path":	"/tmp/test_dummy.raw",
+	"kernel_info":	{
+		"os_type":	"Windows",
+		"os_version":	null,
+		"kernel_version":	null,
+		"architecture":	null,
+		"build_str":	null,
+		"image_type":	null,
+		"kdbg_offset":	null,
+		"dtb":	null
+	},
+	"summary":	{
+		"total_processes":	0,
+		"hidden_processes":	0,
+		"inactive_processes":	0,
+		"total_connections":	0,
+		"hidden_connections":	0,
+		"total_modules":	0,
+		"hidden_modules":	0,
+		"hook_count":	0
+	},
+	"processes":	[],
+	"hidden_processes":	[],
+	"inactive_processes":	[],
+	"connections":	[],
+	"hidden_connections":	[],
+	"modules":	[],
+	"hidden_modules":	[],
+	"hooks":	[],
+	"errors":	[]
+}

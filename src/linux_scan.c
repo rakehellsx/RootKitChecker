@@ -933,5 +933,207 @@ int linux_full_scan(const char *image_path, ScanResult *result)
         free(cred_procs);
     }
 
+    /* 16. Kernel data collection (kallsyms, iomem, vmcoreinfo, kmsg,
+     *     boottime, lsmod, kthreads, ebpf, netfilter, mountinfo) */
+    linux_collect_kernel_data(image_path, &result->lnx_kernel);
+
+    return 0;
+}
+
+/* ================================================================== */
+/*  Linux kernel data collection functions                             */
+/* ================================================================== */
+
+/* linux.kallsyms.Kallsyms */
+int linux_collect_kallsyms(const char *image_path, LinuxKernelData *kd)
+{
+    kd->kallsyms = NULL; kd->kallsyms_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.kallsyms.Kallsyms", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    KVRecord *recs = calloc(res->row_count + 1, sizeof(KVRecord));
+    if (!recs) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(recs[r].key,   sizeof(recs[r].key),   row_get(res, &res->rows[r], "Symbol"));
+        safe_copy(recs[r].value, sizeof(recs[r].value), row_get(res, &res->rows[r], "Address"));
+        safe_copy(recs[r].extra, sizeof(recs[r].extra), row_get(res, &res->rows[r], "Type"));
+    }
+    kd->kallsyms = recs; kd->kallsyms_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.iomem.IOMem */
+int linux_collect_iomem(const char *image_path, LinuxKernelData *kd)
+{
+    kd->iomem = NULL; kd->iomem_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.iomem.IOMem", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    MemRegionRecord *regions = calloc(res->row_count + 1, sizeof(MemRegionRecord));
+    if (!regions) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        regions[r].start = parse_u64(row_get(res, &res->rows[r], "Start"));
+        regions[r].end   = parse_u64(row_get(res, &res->rows[r], "End"));
+        regions[r].size  = (regions[r].end > regions[r].start) ? (regions[r].end - regions[r].start) : 0;
+        safe_copy(regions[r].name, sizeof(regions[r].name), row_get(res, &res->rows[r], "Name"));
+    }
+    kd->iomem = regions; kd->iomem_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.vmcoreinfo.VMCoreInfo */
+int linux_collect_vmcoreinfo(const char *image_path, LinuxKernelData *kd)
+{
+    kd->vmcoreinfo = NULL; kd->vmcoreinfo_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.vmcoreinfo.VMCoreInfo", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    KVRecord *recs = calloc(res->row_count + 1, sizeof(KVRecord));
+    if (!recs) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(recs[r].key,   sizeof(recs[r].key),   row_get(res, &res->rows[r], "Key"));
+        safe_copy(recs[r].value, sizeof(recs[r].value), row_get(res, &res->rows[r], "Value"));
+    }
+    kd->vmcoreinfo = recs; kd->vmcoreinfo_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.kmsg.Kmsg */
+int linux_collect_kernel_messages(const char *image_path, LinuxKernelData *kd)
+{
+    kd->kernel_messages = NULL; kd->kernel_message_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.kmsg.Kmsg", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    KVRecord *recs = calloc(res->row_count + 1, sizeof(KVRecord));
+    if (!recs) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(recs[r].key,   sizeof(recs[r].key),   row_get(res, &res->rows[r], "Timestamp"));
+        safe_copy(recs[r].value, sizeof(recs[r].value), row_get(res, &res->rows[r], "Message"));
+        safe_copy(recs[r].extra, sizeof(recs[r].extra), row_get(res, &res->rows[r], "Facility"));
+    }
+    kd->kernel_messages = recs; kd->kernel_message_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.boottime.Boottime */
+int linux_collect_boot_time(const char *image_path, LinuxKernelData *kd)
+{
+    kd->boot_time[0] = '\0';
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.boottime.Boottime", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    if (res->row_count > 0) {
+        const char *bt = row_get(res, &res->rows[0], "BootTime");
+        if (strcmp(bt, "N/A") == 0) bt = row_get(res, &res->rows[0], "Boot Time");
+        if (strcmp(bt, "N/A") == 0) bt = row_get(res, &res->rows[0], "Value");
+        safe_copy(kd->boot_time, sizeof(kd->boot_time), bt);
+    }
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.lsmod.Lsmod (kernel data variant) */
+int linux_collect_loaded_modules(const char *image_path, LinuxKernelData *kd)
+{
+    kd->loaded_modules = NULL; kd->loaded_module_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.lsmod.Lsmod", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    ModuleRecord *mods = calloc(res->row_count + 1, sizeof(ModuleRecord));
+    if (!mods) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(mods[r].name, sizeof(mods[r].name), row_get(res, &res->rows[r], "Name"));
+        mods[r].base = parse_u64(row_get(res, &res->rows[r], "Base"));
+        mods[r].size = parse_u64(row_get(res, &res->rows[r], "Size"));
+        safe_copy(mods[r].source, sizeof(mods[r].source), "linux.lsmod");
+    }
+    kd->loaded_modules = mods; kd->loaded_module_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.kthreads.Kthreads */
+int linux_collect_kernel_threads(const char *image_path, LinuxKernelData *kd)
+{
+    kd->kernel_threads = NULL; kd->kernel_thread_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.kthreads.Kthreads", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    KThreadRecord *threads = calloc(res->row_count + 1, sizeof(KThreadRecord));
+    if (!threads) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        threads[r].pid    = parse_u64(row_get(res, &res->rows[r], "PID"));
+        threads[r].ppid   = parse_u64(row_get(res, &res->rows[r], "PPID"));
+        safe_copy(threads[r].name,  sizeof(threads[r].name),  row_get(res, &res->rows[r], "COMM"));
+        threads[r].offset = parse_u64(row_get(res, &res->rows[r], "OFFSET (V)"));
+        safe_copy(threads[r].state, sizeof(threads[r].state), row_get(res, &res->rows[r], "State"));
+    }
+    kd->kernel_threads = threads; kd->kernel_thread_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.ebpf.EBPF (kernel data variant) */
+int linux_collect_ebpf_programs(const char *image_path, LinuxKernelData *kd)
+{
+    kd->ebpf_programs = NULL; kd->ebpf_program_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.ebpf.EBPF", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    HookRecord *hooks = calloc(res->row_count + 1, sizeof(HookRecord));
+    if (!hooks) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(hooks[r].symbol,      sizeof(hooks[r].symbol),    row_get(res, &res->rows[r], "Name"));
+        safe_copy(hooks[r].module,      sizeof(hooks[r].module),    row_get(res, &res->rows[r], "Tag"));
+        hooks[r].handler_addr = parse_u64(row_get(res, &res->rows[r], "LoadTime"));
+        safe_copy(hooks[r].hook_type,   sizeof(hooks[r].hook_type), "eBPF");
+        hooks[r].hooked = true;
+    }
+    kd->ebpf_programs = hooks; kd->ebpf_program_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.netfilter.Netfilter (kernel data variant) */
+int linux_collect_netfilter_hooks(const char *image_path, LinuxKernelData *kd)
+{
+    kd->netfilter_hooks = NULL; kd->netfilter_hook_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.netfilter.Netfilter", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    HookRecord *hooks = calloc(res->row_count + 1, sizeof(HookRecord));
+    if (!hooks) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(hooks[r].symbol,    sizeof(hooks[r].symbol),    row_get(res, &res->rows[r], "Hook"));
+        hooks[r].handler_addr = parse_u64(row_get(res, &res->rows[r], "Handler"));
+        safe_copy(hooks[r].module,    sizeof(hooks[r].module),    row_get(res, &res->rows[r], "Module"));
+        safe_copy(hooks[r].hook_type, sizeof(hooks[r].hook_type), "netfilter");
+        hooks[r].hooked = true;
+    }
+    kd->netfilter_hooks = hooks; kd->netfilter_hook_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* linux.mountinfo.MountInfo */
+int linux_collect_mount_info(const char *image_path, LinuxKernelData *kd)
+{
+    kd->mount_info = NULL; kd->mount_info_count = 0;
+    PluginResult *res = pybridge_run_plugin(image_path, "linux.mountinfo.MountInfo", NULL);
+    if (!res || res->error) { if (res) pybridge_free_result(res); return -1; }
+    MountRecord *mounts = calloc(res->row_count + 1, sizeof(MountRecord));
+    if (!mounts) { pybridge_free_result(res); return -1; }
+    for (int r = 0; r < res->row_count; r++) {
+        mounts[r].pid = parse_u64(row_get(res, &res->rows[r], "PID"));
+        safe_copy(mounts[r].devname, sizeof(mounts[r].devname), row_get(res, &res->rows[r], "Device"));
+        safe_copy(mounts[r].path,    sizeof(mounts[r].path),    row_get(res, &res->rows[r], "Path"));
+        safe_copy(mounts[r].fstype,  sizeof(mounts[r].fstype),  row_get(res, &res->rows[r], "FSType"));
+        safe_copy(mounts[r].options, sizeof(mounts[r].options), row_get(res, &res->rows[r], "Options"));
+    }
+    kd->mount_info = mounts; kd->mount_info_count = res->row_count;
+    pybridge_free_result(res); return 0;
+}
+
+/* Aggregate: collect all 10 Linux kernel data items */
+int linux_collect_kernel_data(const char *image_path, LinuxKernelData *kd)
+{
+    memset(kd, 0, sizeof(*kd));
+    linux_collect_kallsyms(image_path, kd);
+    linux_collect_iomem(image_path, kd);
+    linux_collect_vmcoreinfo(image_path, kd);
+    linux_collect_kernel_messages(image_path, kd);
+    linux_collect_boot_time(image_path, kd);
+    linux_collect_loaded_modules(image_path, kd);
+    linux_collect_kernel_threads(image_path, kd);
+    linux_collect_ebpf_programs(image_path, kd);
+    linux_collect_netfilter_hooks(image_path, kd);
+    linux_collect_mount_info(image_path, kd);
     return 0;
 }

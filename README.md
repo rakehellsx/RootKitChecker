@@ -1,186 +1,323 @@
-# RootKitChecker (memscope)
+# RootKitChecker
 
-**RootKitChecker** (内部代号 memscope) 是一个基于 [Volatility 3](https://github.com/volatilityfoundation/volatility3) 的 Linux C/C++ 内存取证与 Rootkit 检测工具。它能够对 Windows 和 Linux 系统的内存镜像进行深度分析，检测隐藏进程、内核级 Rootkit 钩子、隐藏网络连接等高级威胁，并将所有检测结果以结构化的 **JSON** 格式输出，便于与 SIEM、SOAR 或其他自动化分析平台集成。
+> 基于 [Volatility3](https://github.com/volatilityfoundation/volatility3) 的 Linux C/C++ 内存取证工具，支持 Windows 和 Linux 内存镜像分析，检测隐藏进程、Rootkit、隐藏网络连接，并采集完整内核数据，所有结果以 **cJSON** 格式输出。
 
 ---
 
-## 核心功能特性
+## 功能特性
 
-| 类别 | 检测能力说明 |
-|---|---|
-| **隐藏进程检测** | 交叉比对 `PsList`（链表遍历）、`PsScan`（内存池/堆扫描）与 `PsXView`（多源交叉视图），精准发现被断链隐藏的恶意进程。 |
-| **不活跃进程检测** | 识别已终止但其进程控制块（EPROCESS/task_struct）仍驻留在内存中的进程（如非零 `ExitTime` 的进程）。 |
-| **Linux Rootkit 检测** | 深度检测 Linux 内核威胁，包括：系统调用表钩子（`check_syscall`）、IDT 钩子（`check_idt`）、`afinfo` 结构篡改（用于隐藏网络连接）、隐藏内核模块（`hidden_modules`/`modxview`）、恶意 eBPF 程序、Netfilter 钩子、TTY 处理函数钩子、键盘通知链钩子（键盘记录器）以及凭据异常（`check_creds`）。 |
-| **Windows Rootkit 检测** | 检测 SSDT 钩子、进程空洞化（`HollowProcesses`）、驱动模块异常（`DriverModule`）以及隐藏的内核模块。 |
-| **隐藏网络连接检测** | Windows 环境下交叉比对 `NetScan` 与 `NetStat`；Linux 环境下交叉比对 `sockstat` 与 `lsof`，发现未关联合法进程的隐蔽网络套接字。 |
-| **内核数据提取** | 自动提取目标系统的内核关键信息。Windows：KDBG、DTB、构建字符串、架构信息；Linux：`vmcoreinfo`、`kallsyms`。 |
-| **标准化 JSON 输出** | 采用 [cJSON](https://github.com/DaveGamble/cJSON) 库，将所有扫描结果序列化为标准 JSON 格式，包含全局摘要、分类数组及错误日志。 |
+### 检测能力
+
+| 类别 | 功能 | 使用插件 |
+|---|---|---|
+| **进程检测** | 隐藏进程（链表外进程） | PsList vs PsScan vs PsXView / PIDHashTable 三源交叉比对 |
+| **进程检测** | 不活跃/已终止进程 | PsScan（含 exit_time 进程） |
+| **进程检测** | 进程空洞化（Hollowing） | `windows.hollowprocesses.HollowProcesses` |
+| **进程检测** | 凭据异常（权限提升） | `linux.check_creds.Check_creds` |
+| **网络检测** | 隐藏网络连接 | NetScan vs NetStat / Sockstat vs Lsof 交叉比对 |
+| **模块检测** | 隐藏内核模块/驱动 | Modules vs ModScan / Lsmod vs Hidden_modules 交叉比对 |
+| **钩子检测** | SSDT 钩子 | `windows.ssdt.SSDT` |
+| **钩子检测** | IDT 钩子 | `linux.check_idt.Check_idt` |
+| **钩子检测** | 系统调用表钩子 | `linux.check_syscall.Check_syscall` |
+| **钩子检测** | afinfo 结构篡改 | `linux.check_afinfo.Check_afinfo` |
+| **钩子检测** | Netfilter 钩子 | `linux.netfilter.Netfilter` |
+| **钩子检测** | TTY 处理函数钩子 | `linux.tty_check.tty_check` |
+| **钩子检测** | 键盘通知链钩子 | `linux.keyboard_notifiers.keyboard_notifiers` |
+| **eBPF 检测** | eBPF 程序挂载点 | `linux.ebpf.EBPF` |
+
+### Windows 内核数据采集
+
+| JSON 字段 | Volatility3 插件 | 说明 |
+|---|---|---|
+| `os_info` | `windows.info.Info` | 系统版本、内核基址、KDBG 结构 |
+| `loaded_modules` | `windows.modules.Modules` | 已加载驱动完整列表（名称、基址、大小、路径） |
+| `big_pools` | `windows.bigpools.BigPools` | 内核大页池分配，可疑 Tag 自动标记（Rootkit 常分配大页隐藏代码） |
+| `memory_map` | `windows.memmap.Memmap` | 内核虚拟地址映射（System PID=0） |
+| `statistics` | `windows.statistics.Statistics` | 内存统计摘要（页面计数、大小） |
+| `virtual_map` | `windows.virtmap.VirtMap` | 虚拟内存区域划分（起止地址、名称） |
+
+### Linux 内核数据采集
+
+| JSON 字段 | Volatility3 插件 | 说明 |
+|---|---|---|
+| `kallsyms` | `linux.kallsyms.Kallsyms` | 内核符号表（符号名、地址、类型），可用于定位未导出函数 |
+| `iomem` | `linux.iomem.IOMem` | 物理内存 / I/O 资源映射 |
+| `vmcoreinfo` | `linux.vmcoreinfo.VMCoreInfo` | VMCore 元数据（内核版本、页大小、符号偏移） |
+| `kernel_messages` | `linux.kmsg.Kmsg` | 内核 ring buffer 日志（可能含 Rootkit 加载记录） |
+| `boot_time` | `linux.boottime.Boottime` | 系统启动时间戳 |
+| `loaded_modules` | `linux.lsmod.Lsmod` | 内核模块完整列表（名称、基址、大小） |
+| `kernel_threads` | `linux.kthreads.Kthreads` | 内核线程枚举（可发现隐藏 Rootkit 工作线程） |
+| `ebpf_programs` | `linux.ebpf.EBPF` | eBPF 程序挂载点（新型 Rootkit 载体） |
+| `netfilter_hooks` | `linux.netfilter.Netfilter` | Netfilter 钩子链（所有钩子点） |
+| `mount_info` | `linux.mountinfo.MountInfo` | 文件系统挂载信息（Rootkit 常 bind-mount 隐藏文件） |
 
 ---
 
 ## 架构设计
 
-本项目采用 **C/C++ 主程序 + Python 子进程桥接（Subprocess Bridge）** 的混合架构设计：
+```
+┌─────────────────────────────────────────────────────┐
+│                  RootKitChecker (C)                  │
+│                                                      │
+│  main.c ──► windows_scan.c / linux_scan.c           │
+│                    │                                 │
+│              py_bridge.c                             │
+│            (subprocess 调用)                         │
+│                    │                                 │
+│           scripts/vol_runner.py                      │
+│                    │                                 │
+│              volatility3 (Python)                    │
+│                    │                                 │
+│           内存镜像文件 (.vmem/.raw/.lime)             │
+│                    │                                 │
+│  json_output.c ──► cJSON ──► stdout / 文件           │
+└─────────────────────────────────────────────────────┘
+```
 
-1. **C/C++ 核心层**：负责命令行解析、任务编排、结果聚合与 JSON 序列化。
-2. **Python 桥接层**：通过 `vol_runner.py` 脚本作为独立子进程调用 Volatility 3 框架执行具体的内存分析插件。
-
-**设计优势**：
-- **环境隔离**：避免了将 CPython 直接嵌入 C 程序时常见的 ABI 版本冲突问题。
-- **高兼容性**：C 二进制文件保持独立，Python 虚拟环境（包含 Volatility 3 及其依赖）可独立更新和维护。
-- **易于集成**：对外提供纯粹的 C 接口和 JSON 输出，屏蔽了底层 Python 调用的复杂性。
+**设计亮点**：采用 subprocess 桥接模式而非嵌入 CPython，C 二进制与 Python 环境完全解耦，可独立升级 volatility3 版本，无需重新编译 C 代码。
 
 ---
 
 ## 环境依赖
 
-| 组件 | 最低版本要求 | 说明 |
+| 组件 | 版本要求 | 说明 |
 |---|---|---|
-| **操作系统** | Ubuntu 22.04+ | 推荐的构建与运行环境 |
-| **编译器** | GCC 11+ / Clang | 支持 C11 标准 |
-| **Python** | 3.8+ | 用于运行 Volatility 3 |
-| **Volatility 3** | 2.x | 必须安装在 Python 虚拟环境中 |
-| **cJSON** | 1.7+ | 已内置于 `third_party/cjson/`，无需额外安装 |
+| GCC / Clang | >= 9 | C99 标准 |
+| Python | >= 3.8 | 用于运行 volatility3 |
+| volatility3 | >= 2.0 | 内存分析框架 |
+| cJSON | 内置 | 已包含在 `third_party/cjson/`，无需额外安装 |
 
 ---
 
 ## 编译与安装
 
-### 1. 获取源码
+### 方式一：Make（推荐）
 
 ```bash
 git clone https://github.com/rakehellsx/RootKitChecker.git
 cd RootKitChecker
-```
-
-### 2. 编译 C/C++ 主程序
-
-推荐使用 `make` 进行编译：
-
-```bash
-# 编译 Release 版本（默认）
+git checkout dev
 make
-
-# 编译 Debug 版本
-make debug
-
-# 安装到系统目录（可选，默认 /usr/local）
-sudo make install PREFIX=/usr/local
+# 编译产物：./build/memscope
 ```
 
-编译完成后，可执行文件将生成在 `build/memscope`。
-
-### 3. 配置 Python 虚拟环境
-
-本项目依赖 Volatility 3，建议使用内置脚本自动创建并配置虚拟环境：
+### 方式二：CMake
 
 ```bash
-# 自动创建 .venv 目录并安装 volatility3
-./scripts/setup_venv.sh .venv
+mkdir build_cmake && cd build_cmake
+cmake ..
+make
 ```
 
 ---
 
-## 使用指南
+## Python 虚拟环境配置
+
+```bash
+# 方式一：使用内置脚本（推荐）
+./scripts/setup_venv.sh .venv
+
+# 方式二：手动配置
+python3 -m venv .venv
+source .venv/bin/activate
+pip install volatility3
+```
+
+---
+
+## 使用方法
 
 ### 基本用法
 
 ```bash
-# 导出虚拟环境路径（必须）
 export MEMSCOPE_VENV=$(pwd)/.venv
 
-# 自动检测系统类型并扫描，格式化输出 JSON
-./build/memscope -i /path/to/memory_image.raw --pretty
+# 自动检测 OS 并扫描（输出到 stdout）
+./build/memscope -i /path/to/image.vmem
 
-# 强制指定为 Windows 镜像，并将结果保存到文件
-./build/memscope -i /path/to/win10.vmem --os windows -o report.json
+# 指定 OS 类型
+./build/memscope -i /path/to/image.vmem --os windows
+./build/memscope -i /path/to/image.lime --os linux
 
-# 强制指定为 Linux 镜像，跳过网络和模块检测以加快速度
-./build/memscope -i /path/to/linux.lime --os linux --no-net --no-modules --pretty
+# 格式化 JSON 输出
+./build/memscope -i /path/to/image.vmem --pretty
+
+# 输出到文件
+./build/memscope -i /path/to/image.vmem -o report.json --pretty
 ```
 
-### 命令行参数说明
+### 命令行参数
 
-```text
-Usage: memscope -i <image_path> [options]
-
-Options:
-  -i <path>        内存镜像文件路径 (必填)
-  -o <path>        输出 JSON 文件路径 (默认: 标准输出)
-  -v <path>        Python 虚拟环境目录 (覆盖 MEMSCOPE_VENV 环境变量)
-  --os <type>      强制指定操作系统类型: windows | linux | auto (默认: auto)
-  --pretty         格式化 JSON 输出 (Pretty-print)
-  --no-net         跳过网络连接分析
-  --no-modules     跳过内核模块分析
-  --no-hooks       跳过 Rootkit 钩子检测
-  --version        打印版本信息并退出
-  -h, --help       显示帮助信息
-```
+| 参数 | 说明 |
+|---|---|
+| `-i <path>` | 内存镜像路径（必填） |
+| `--os <windows\|linux>` | 指定操作系统类型（可选，默认自动检测） |
+| `-o <file>` | 输出 JSON 文件路径（可选，默认 stdout） |
+| `--pretty` | 格式化 JSON 输出（缩进 2 空格） |
+| `--venv <path>` | Python 虚拟环境路径（也可通过 `MEMSCOPE_VENV` 环境变量设置） |
+| `--no-net` | 跳过网络连接分析 |
+| `--no-modules` | 跳过内核模块分析 |
+| `--no-hooks` | 跳过 Rootkit 钩子检测 |
+| `--version` | 显示版本信息 |
+| `--help` | 显示帮助信息 |
 
 ---
 
-## 符号表配置 (Symbol Tables)
+## JSON 输出结构
 
-Volatility 3 需要符号表来解析内存结构。
-
-- **Windows 镜像**：在首次分析时，Volatility 3 会自动从微软符号服务器下载所需的 PDB 符号文件，需保持网络畅通。
-- **Linux 镜像**：Linux 内核符号表需要手动生成。请在目标系统（或内核版本完全一致的系统）上使用 [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) 工具生成 JSON 格式的符号表，并将其放置在虚拟环境的对应目录中：
-  ```bash
-  # 存放路径示例
-  .venv/lib/python3.*/site-packages/volatility3/symbols/linux/
-  ```
-
----
-
-## JSON 输出结构示例
-
-工具输出的 JSON 数据结构清晰，包含元数据、内核信息、全局摘要以及各类检测结果的详细数组。
+### 顶层结构
 
 ```json
 {
-  "tool": "memscope",
-  "version": "1.0.0",
-  "scan_time": "2026-04-24T12:00:00Z",
+  "tool": "RootKitChecker",
+  "version": "1.1.0",
+  "scan_time": "2026-04-25T12:00:00Z",
   "image_path": "/path/to/image.vmem",
-  "kernel_info": {
-    "os_type": "Windows",
-    "architecture": "x86_64",
-    "kdbg_offset": "0xf80002a3e120"
-  },
-  "summary": {
-    "total_processes": 85,
-    "hidden_processes": 1,
-    "hook_count": 2
-  },
-  "hidden_processes": [
-    {
-      "pid": 1234,
-      "ppid": 4,
-      "name": "malware.exe",
-      "in_pslist": false,
-      "in_psscan": true,
-      "hidden": true,
-      "source": "psscan(hidden)"
-    }
+  "kernel_info": { ... },
+  "summary": { ... },
+  "processes": [ ... ],
+  "hidden_processes": [ ... ],
+  "inactive_processes": [ ... ],
+  "connections": [ ... ],
+  "hidden_connections": [ ... ],
+  "modules": [ ... ],
+  "hidden_modules": [ ... ],
+  "hooks": [ ... ],
+  "windows_kernel_data": { ... },
+  "linux_kernel_data": { ... },
+  "errors": [ ... ]
+}
+```
+
+### Windows 内核数据字段
+
+```json
+"windows_kernel_data": {
+  "os_info": [
+    { "key": "Kernel Base", "value": "0xf80002600000" },
+    { "key": "DTB", "value": "0x187000" },
+    { "key": "NtBuildLab", "value": "19041.1.amd64fre.vb_release" }
   ],
-  "hooks": [
-    {
-      "index": 0,
-      "symbol": "NtCreateFile",
-      "handler": "0xfffff88003...",
-      "module": "rootkit.sys",
-      "hook_type": "SSDT",
-      "hooked": true
-    }
+  "loaded_modules": [
+    { "name": "ntoskrnl.exe", "base": "0xf80002600000", "size": 5898240, "path": "\\SystemRoot\\system32\\ntoskrnl.exe" }
+  ],
+  "big_pools": [
+    { "virtual_addr": "0xffff800012340000", "size": 65536, "tag": "Driv", "type": "NonPagedPool", "suspicious": false },
+    { "virtual_addr": "0xffff800098760000", "size": 131072, "tag": "XxXx", "type": "NonPagedPool", "suspicious": true }
+  ],
+  "memory_map": [
+    { "start": "0xfffff80000000000", "end": "0xfffff80010000000", "size": 268435456, "name": "ntoskrnl.exe" }
+  ],
+  "statistics": [
+    { "key": "Pages", "value": "1048576", "extra": "4294967296" }
+  ],
+  "virtual_map": [
+    { "start": "0x0", "end": "0x7fffffffffff", "name": "User Space" },
+    { "start": "0xffff800000000000", "end": "0xffffffffffffffff", "name": "Kernel Space" }
+  ]
+}
+```
+
+### Linux 内核数据字段
+
+```json
+"linux_kernel_data": {
+  "kallsyms": [
+    { "key": "sys_call_table", "value": "0xffffffff81e001a0", "extra": "D" },
+    { "key": "commit_creds", "value": "0xffffffff810a8b40", "extra": "T" }
+  ],
+  "iomem": [
+    { "start": "0x0", "end": "0x9fbff", "size": 654336, "name": "System RAM" },
+    { "start": "0x100000", "end": "0x7fffffff", "size": 2146435072, "name": "System RAM" }
+  ],
+  "vmcoreinfo": [
+    { "key": "OSRELEASE", "value": "5.15.0-91-generic" },
+    { "key": "PAGESIZE", "value": "4096" },
+    { "key": "SYMBOL(init_uts_ns)", "value": "ffffffff82a4b5c0" }
+  ],
+  "kernel_messages": [
+    { "key": "1234567.890123", "value": "rootkit: module loaded successfully", "extra": "kern" },
+    { "key": "1234568.001234", "value": "rootkit: hiding process 1337", "extra": "kern" }
+  ],
+  "boot_time": "2026-01-01T00:00:00",
+  "loaded_modules": [
+    { "name": "rootkit", "base": "0xffffffffc0a00000", "size": 4096 },
+    { "name": "nf_conntrack", "base": "0xffffffffc0b00000", "size": 163840 }
+  ],
+  "kernel_threads": [
+    { "pid": 2, "ppid": 0, "name": "kthreadd", "state": "S" },
+    { "pid": 3, "ppid": 2, "name": "rcu_gp", "state": "I" }
+  ],
+  "ebpf_programs": [
+    { "symbol": "xdp_redirect_prog", "module": "abcd1234efgh5678", "hook_type": "eBPF", "hooked": true }
+  ],
+  "netfilter_hooks": [
+    { "symbol": "NF_INET_PRE_ROUTING", "handler": "0xffffffffc0a01234", "module": "rootkit", "hook_type": "netfilter", "hooked": true }
+  ],
+  "mount_info": [
+    { "pid": 1, "device": "/dev/sda1", "path": "/", "fstype": "ext4", "options": "rw,relatime" },
+    { "pid": 1, "device": "overlay", "path": "/proc/1337", "fstype": "overlay", "options": "rw" }
   ]
 }
 ```
 
 ---
 
+## 符号表配置
+
+### Windows（自动下载）
+
+volatility3 会自动从 Microsoft Symbol Server 下载符号表。如需离线使用：
+
+```bash
+export VOLATILITY_SYMBOLS=/path/to/symbols
+```
+
+### Linux（手动生成）
+
+```bash
+# 在目标系统上生成 ISF 符号文件
+pip install dwarf2json
+dwarf2json linux --elf /usr/lib/debug/boot/vmlinux-$(uname -r) > linux.json
+
+# 放置到 volatility3 符号目录
+cp linux.json ~/.local/lib/python3.x/site-packages/volatility3/symbols/linux/
+```
+
+---
+
+## 项目结构
+
+```
+RootKitChecker/
+├── README.md
+├── CMakeLists.txt
+├── Makefile
+├── src/
+│   ├── main.c              # CLI 主程序，参数解析，扫描编排
+│   ├── py_bridge.c         # subprocess 桥接层
+│   ├── windows_scan.c      # Windows 检测 + 内核数据采集（6项）
+│   ├── linux_scan.c        # Linux 检测 + 内核数据采集（10项）
+│   └── json_output.c       # cJSON 序列化层（覆盖全部数据结构）
+├── include/
+│   ├── memscope.h          # 公共 API 与数据结构定义
+│   ├── py_bridge.h         # 桥接层接口
+│   ├── windows_scan.h      # Windows 模块接口（含6项内核数据函数）
+│   └── linux_scan.h        # Linux 模块接口（含10项内核数据函数）
+├── scripts/
+│   ├── vol_runner.py       # Volatility3 Python 运行脚本（支持全部插件）
+│   └── setup_venv.sh       # 一键环境配置脚本
+├── third_party/
+│   └── cjson/
+│       ├── cJSON.c         # cJSON 库源码（内置）
+│       └── cJSON.h
+└── docs/
+    ├── example_output_windows.json
+    └── example_output_linux.json
+```
+
+---
+
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
-
-- 核心依赖 [Volatility 3](https://github.com/volatilityfoundation/volatility3) 遵循 Volatility Software License (VSL)。
-- JSON 解析库 [cJSON](https://github.com/DaveGamble/cJSON) 遵循 MIT License。
+本项目基于 MIT License 开源。volatility3 遵循其自身的 [Volatility Software License](https://www.volatilityfoundation.org/license/vsl-v1.0)。cJSON 遵循 MIT License。

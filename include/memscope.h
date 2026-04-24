@@ -2,7 +2,8 @@
  * memscope.h - Memory Forensics Tool based on Volatility3
  *
  * Main header: data structures, constants, and function declarations
- * for Windows/Linux hidden process, rootkit, and network detection.
+ * for Windows/Linux hidden process, rootkit, network detection,
+ * and comprehensive kernel data collection.
  */
 
 #ifndef MEMSCOPE_H
@@ -20,9 +21,9 @@ extern "C" {
 /*  Version                                                             */
 /* ------------------------------------------------------------------ */
 #define MEMSCOPE_VERSION_MAJOR 1
-#define MEMSCOPE_VERSION_MINOR 0
+#define MEMSCOPE_VERSION_MINOR 1
 #define MEMSCOPE_VERSION_PATCH 0
-#define MEMSCOPE_VERSION_STR   "1.0.0"
+#define MEMSCOPE_VERSION_STR   "1.1.0"
 
 /* ------------------------------------------------------------------ */
 /*  OS type detected from the image                                    */
@@ -82,7 +83,7 @@ typedef struct {
 } ModuleRecord;
 
 /* ------------------------------------------------------------------ */
-/*  Syscall / IDT hook record                                           */
+/*  Syscall / IDT / hook record                                         */
 /* ------------------------------------------------------------------ */
 typedef struct {
     uint32_t    index;
@@ -90,11 +91,65 @@ typedef struct {
     uint64_t    handler_addr;
     char        module[256];
     bool        hooked;
-    char        hook_type[64];   /* SSDT / IDT / inline / …           */
+    char        hook_type[64];   /* SSDT / IDT / afinfo / eBPF / …    */
 } HookRecord;
 
 /* ------------------------------------------------------------------ */
-/*  Kernel information                                                  */
+/*  Generic key-value record (for pool entries, iomem, vmcoreinfo …)  */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    char        key[256];
+    char        value[512];
+    char        extra[256];      /* optional third column              */
+} KVRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Memory region record (memmap / virtmap / iomem)                    */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    uint64_t    start;
+    uint64_t    end;
+    uint64_t    size;
+    char        name[256];       /* region / segment name              */
+    char        flags[64];       /* permissions / type flags           */
+    uint64_t    pid;             /* owning process (0 = kernel)        */
+} MemRegionRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Big pool allocation record (Windows BigPools)                      */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    uint64_t    virtual_addr;
+    uint64_t    size;
+    char        tag[8];          /* 4-byte pool tag + NUL              */
+    char        type[32];        /* NonPagedPool / PagedPool / …       */
+    bool        suspicious;      /* tag not in known-good list         */
+} BigPoolRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Kernel thread record (Linux kthreads)                              */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    uint64_t    pid;
+    uint64_t    ppid;
+    char        name[256];
+    uint64_t    offset;
+    char        state[32];
+} KThreadRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Mount info record (Linux mountinfo)                                */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    uint64_t    pid;             /* namespace pid                      */
+    char        devname[256];
+    char        path[512];
+    char        fstype[64];
+    char        options[256];
+} MountRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Kernel information (basic OS/image metadata)                       */
 /* ------------------------------------------------------------------ */
 typedef struct {
     char        os_type[32];
@@ -108,11 +163,85 @@ typedef struct {
 } KernelInfo;
 
 /* ------------------------------------------------------------------ */
+/*  Windows kernel data collection                                      */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    /* windows.info.Info */
+    KVRecord       *os_info;
+    int             os_info_count;
+
+    /* windows.modules.Modules — full loaded driver list */
+    ModuleRecord   *loaded_modules;
+    int             loaded_module_count;
+
+    /* windows.bigpools.BigPools — large kernel pool allocations */
+    BigPoolRecord  *big_pools;
+    int             big_pool_count;
+
+    /* windows.memmap.Memmap — kernel virtual address map */
+    MemRegionRecord *memory_map;
+    int              memory_map_count;
+
+    /* windows.statistics.Statistics — memory statistics */
+    KVRecord       *statistics;
+    int             statistics_count;
+
+    /* windows.virtmap.VirtMap — virtual memory region layout */
+    MemRegionRecord *virtual_map;
+    int              virtual_map_count;
+} WinKernelData;
+
+/* ------------------------------------------------------------------ */
+/*  Linux kernel data collection                                        */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    /* linux.kallsyms.Kallsyms — kernel symbol table */
+    KVRecord       *kallsyms;
+    int             kallsyms_count;
+
+    /* linux.iomem.IOMem — physical memory / I/O resource map */
+    MemRegionRecord *iomem;
+    int              iomem_count;
+
+    /* linux.vmcoreinfo.VMCoreInfo — vmcore metadata */
+    KVRecord       *vmcoreinfo;
+    int             vmcoreinfo_count;
+
+    /* linux.kmsg.Kmsg — kernel ring buffer messages */
+    KVRecord       *kernel_messages;
+    int             kernel_message_count;
+
+    /* linux.boottime.Boottime — system boot timestamp */
+    char            boot_time[128];
+
+    /* linux.lsmod.Lsmod — loaded kernel modules */
+    ModuleRecord   *loaded_modules;
+    int             loaded_module_count;
+
+    /* linux.kthreads.Kthreads — kernel threads */
+    KThreadRecord  *kernel_threads;
+    int             kernel_thread_count;
+
+    /* linux.ebpf.EBPF — eBPF programs */
+    HookRecord     *ebpf_programs;
+    int             ebpf_program_count;
+
+    /* linux.netfilter.Netfilter — netfilter hook chain */
+    HookRecord     *netfilter_hooks;
+    int             netfilter_hook_count;
+
+    /* linux.mountinfo.MountInfo — filesystem mount points */
+    MountRecord    *mount_info;
+    int             mount_info_count;
+} LinuxKernelData;
+
+/* ------------------------------------------------------------------ */
 /*  Full scan result container                                          */
 /* ------------------------------------------------------------------ */
 typedef struct {
     KernelInfo      kernel;
 
+    /* ---- process detection ---- */
     ProcessRecord  *processes;
     int             process_count;
 
@@ -122,21 +251,29 @@ typedef struct {
     ProcessRecord  *inactive_processes;
     int             inactive_process_count;
 
+    /* ---- network detection ---- */
     NetRecord      *connections;
     int             connection_count;
 
     NetRecord      *hidden_connections;
     int             hidden_connection_count;
 
+    /* ---- module detection ---- */
     ModuleRecord   *modules;
     int             module_count;
 
     ModuleRecord   *hidden_modules;
     int             hidden_module_count;
 
+    /* ---- hook / rootkit detection ---- */
     HookRecord     *hooks;
     int             hook_count;
 
+    /* ---- kernel data (OS-specific) ---- */
+    WinKernelData   win_kernel;   /* populated for Windows images */
+    LinuxKernelData lnx_kernel;   /* populated for Linux images   */
+
+    /* ---- metadata ---- */
     char            scan_time[64];
     char            image_path[1024];
     int             error_count;

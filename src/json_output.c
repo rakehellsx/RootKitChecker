@@ -1,5 +1,10 @@
 /**
  * json_output.c  –  Serialize ScanResult to cJSON
+ *
+ * Covers all data structures including:
+ *   - KernelInfo, ProcessRecord, NetRecord, ModuleRecord, HookRecord
+ *   - KVRecord, MemRegionRecord, BigPoolRecord, KThreadRecord, MountRecord
+ *   - WinKernelData (6 items), LinuxKernelData (10 items)
  */
 
 #include "memscope.h"
@@ -9,7 +14,7 @@
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
-/*  Helper: add a string field, replacing empty / N/A with null        */
+/*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
 static void json_add_str(cJSON *obj, const char *key, const char *val)
 {
@@ -31,7 +36,7 @@ static void json_add_u64(cJSON *obj, const char *key, uint64_t val)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Serialize KernelInfo                                                */
+/*  KernelInfo                                                          */
 /* ------------------------------------------------------------------ */
 static cJSON *kernel_info_to_json(const KernelInfo *k)
 {
@@ -48,7 +53,7 @@ static cJSON *kernel_info_to_json(const KernelInfo *k)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Serialize ProcessRecord                                             */
+/*  ProcessRecord                                                       */
 /* ------------------------------------------------------------------ */
 static cJSON *process_to_json(const ProcessRecord *p)
 {
@@ -70,7 +75,7 @@ static cJSON *process_to_json(const ProcessRecord *p)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Serialize NetRecord                                                 */
+/*  NetRecord                                                           */
 /* ------------------------------------------------------------------ */
 static cJSON *net_to_json(const NetRecord *n)
 {
@@ -89,7 +94,7 @@ static cJSON *net_to_json(const NetRecord *n)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Serialize ModuleRecord                                              */
+/*  ModuleRecord                                                        */
 /* ------------------------------------------------------------------ */
 static cJSON *module_to_json(const ModuleRecord *m)
 {
@@ -104,7 +109,7 @@ static cJSON *module_to_json(const ModuleRecord *m)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Serialize HookRecord                                                */
+/*  HookRecord                                                          */
 /* ------------------------------------------------------------------ */
 static cJSON *hook_to_json(const HookRecord *h)
 {
@@ -119,7 +124,79 @@ static cJSON *hook_to_json(const HookRecord *h)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build a JSON array from a generic array                            */
+/*  KVRecord                                                            */
+/* ------------------------------------------------------------------ */
+static cJSON *kv_to_json(const KVRecord *kv)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_str(obj, "key",   kv->key);
+    json_add_str(obj, "value", kv->value);
+    if (kv->extra[0] != '\0' && strcmp(kv->extra, "N/A") != 0)
+        json_add_str(obj, "extra", kv->extra);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  MemRegionRecord                                                     */
+/* ------------------------------------------------------------------ */
+static cJSON *memregion_to_json(const MemRegionRecord *r)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_u64(obj, "start", r->start);
+    json_add_u64(obj, "end",   r->end);
+    cJSON_AddNumberToObject(obj, "size", (double)r->size);
+    json_add_str(obj, "name",  r->name);
+    if (r->flags[0] != '\0')
+        json_add_str(obj, "flags", r->flags);
+    if (r->pid != 0)
+        cJSON_AddNumberToObject(obj, "pid", (double)r->pid);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  BigPoolRecord                                                       */
+/* ------------------------------------------------------------------ */
+static cJSON *bigpool_to_json(const BigPoolRecord *p)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_u64(obj, "virtual_addr", p->virtual_addr);
+    cJSON_AddNumberToObject(obj, "size", (double)p->size);
+    json_add_str(obj, "tag",  p->tag);
+    json_add_str(obj, "type", p->type);
+    cJSON_AddBoolToObject(obj, "suspicious", p->suspicious);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  KThreadRecord                                                       */
+/* ------------------------------------------------------------------ */
+static cJSON *kthread_to_json(const KThreadRecord *t)
+{
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddNumberToObject(obj, "pid",  (double)t->pid);
+    cJSON_AddNumberToObject(obj, "ppid", (double)t->ppid);
+    json_add_str(obj, "name",  t->name);
+    json_add_u64(obj, "offset", t->offset);
+    json_add_str(obj, "state", t->state);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  MountRecord                                                         */
+/* ------------------------------------------------------------------ */
+static cJSON *mount_to_json(const MountRecord *m)
+{
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddNumberToObject(obj, "pid", (double)m->pid);
+    json_add_str(obj, "device",  m->devname);
+    json_add_str(obj, "path",    m->path);
+    json_add_str(obj, "fstype",  m->fstype);
+    json_add_str(obj, "options", m->options);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Array builder macro                                                 */
 /* ------------------------------------------------------------------ */
 #define BUILD_ARRAY(arr, cnt, fn) \
     do { \
@@ -129,24 +206,189 @@ static cJSON *hook_to_json(const HookRecord *h)
         cJSON_AddItemToObject(root, key, _a); \
     } while (0)
 
+#define ADD_KV_ARRAY(parent_obj, field_key, arr, cnt) \
+    do { \
+        cJSON *_a = cJSON_CreateArray(); \
+        for (int _i = 0; _i < (cnt); _i++) \
+            cJSON_AddItemToArray(_a, kv_to_json(&(arr)[_i])); \
+        cJSON_AddItemToObject((parent_obj), (field_key), _a); \
+    } while (0)
+
+#define ADD_MOD_ARRAY(parent_obj, field_key, arr, cnt) \
+    do { \
+        cJSON *_a = cJSON_CreateArray(); \
+        for (int _i = 0; _i < (cnt); _i++) \
+            cJSON_AddItemToArray(_a, module_to_json(&(arr)[_i])); \
+        cJSON_AddItemToObject((parent_obj), (field_key), _a); \
+    } while (0)
+
+#define ADD_REGION_ARRAY(parent_obj, field_key, arr, cnt) \
+    do { \
+        cJSON *_a = cJSON_CreateArray(); \
+        for (int _i = 0; _i < (cnt); _i++) \
+            cJSON_AddItemToArray(_a, memregion_to_json(&(arr)[_i])); \
+        cJSON_AddItemToObject((parent_obj), (field_key), _a); \
+    } while (0)
+
+#define ADD_HOOK_ARRAY(parent_obj, field_key, arr, cnt) \
+    do { \
+        cJSON *_a = cJSON_CreateArray(); \
+        for (int _i = 0; _i < (cnt); _i++) \
+            cJSON_AddItemToArray(_a, hook_to_json(&(arr)[_i])); \
+        cJSON_AddItemToObject((parent_obj), (field_key), _a); \
+    } while (0)
+
 /* ------------------------------------------------------------------ */
-/*  memscope_to_json                                                    */
+/*  WinKernelData serializer                                            */
+/* ------------------------------------------------------------------ */
+static cJSON *win_kernel_data_to_json(const WinKernelData *kd)
+{
+    cJSON *obj = cJSON_CreateObject();
+
+    /* os_info: windows.info.Info */
+    if (kd->os_info && kd->os_info_count > 0)
+        ADD_KV_ARRAY(obj, "os_info", kd->os_info, kd->os_info_count);
+    else
+        cJSON_AddArrayToObject(obj, "os_info");
+
+    /* loaded_modules: windows.modules.Modules */
+    if (kd->loaded_modules && kd->loaded_module_count > 0)
+        ADD_MOD_ARRAY(obj, "loaded_modules",
+                      kd->loaded_modules, kd->loaded_module_count);
+    else
+        cJSON_AddArrayToObject(obj, "loaded_modules");
+
+    /* big_pools: windows.bigpools.BigPools */
+    if (kd->big_pools && kd->big_pool_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->big_pool_count; i++)
+            cJSON_AddItemToArray(arr, bigpool_to_json(&kd->big_pools[i]));
+        cJSON_AddItemToObject(obj, "big_pools", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "big_pools");
+    }
+
+    /* memory_map: windows.memmap.Memmap */
+    if (kd->memory_map && kd->memory_map_count > 0)
+        ADD_REGION_ARRAY(obj, "memory_map",
+                         kd->memory_map, kd->memory_map_count);
+    else
+        cJSON_AddArrayToObject(obj, "memory_map");
+
+    /* statistics: windows.statistics.Statistics */
+    if (kd->statistics && kd->statistics_count > 0)
+        ADD_KV_ARRAY(obj, "statistics", kd->statistics, kd->statistics_count);
+    else
+        cJSON_AddArrayToObject(obj, "statistics");
+
+    /* virtual_map: windows.virtmap.VirtMap */
+    if (kd->virtual_map && kd->virtual_map_count > 0)
+        ADD_REGION_ARRAY(obj, "virtual_map",
+                         kd->virtual_map, kd->virtual_map_count);
+    else
+        cJSON_AddArrayToObject(obj, "virtual_map");
+
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  LinuxKernelData serializer                                          */
+/* ------------------------------------------------------------------ */
+static cJSON *lnx_kernel_data_to_json(const LinuxKernelData *kd)
+{
+    cJSON *obj = cJSON_CreateObject();
+
+    /* kallsyms: linux.kallsyms.Kallsyms */
+    if (kd->kallsyms && kd->kallsyms_count > 0)
+        ADD_KV_ARRAY(obj, "kallsyms", kd->kallsyms, kd->kallsyms_count);
+    else
+        cJSON_AddArrayToObject(obj, "kallsyms");
+
+    /* iomem: linux.iomem.IOMem */
+    if (kd->iomem && kd->iomem_count > 0)
+        ADD_REGION_ARRAY(obj, "iomem", kd->iomem, kd->iomem_count);
+    else
+        cJSON_AddArrayToObject(obj, "iomem");
+
+    /* vmcoreinfo: linux.vmcoreinfo.VMCoreInfo */
+    if (kd->vmcoreinfo && kd->vmcoreinfo_count > 0)
+        ADD_KV_ARRAY(obj, "vmcoreinfo",
+                     kd->vmcoreinfo, kd->vmcoreinfo_count);
+    else
+        cJSON_AddArrayToObject(obj, "vmcoreinfo");
+
+    /* kernel_messages: linux.kmsg.Kmsg */
+    if (kd->kernel_messages && kd->kernel_message_count > 0)
+        ADD_KV_ARRAY(obj, "kernel_messages",
+                     kd->kernel_messages, kd->kernel_message_count);
+    else
+        cJSON_AddArrayToObject(obj, "kernel_messages");
+
+    /* boot_time: linux.boottime.Boottime */
+    json_add_str(obj, "boot_time", kd->boot_time);
+
+    /* loaded_modules: linux.lsmod.Lsmod */
+    if (kd->loaded_modules && kd->loaded_module_count > 0)
+        ADD_MOD_ARRAY(obj, "loaded_modules",
+                      kd->loaded_modules, kd->loaded_module_count);
+    else
+        cJSON_AddArrayToObject(obj, "loaded_modules");
+
+    /* kernel_threads: linux.kthreads.Kthreads */
+    if (kd->kernel_threads && kd->kernel_thread_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->kernel_thread_count; i++)
+            cJSON_AddItemToArray(arr, kthread_to_json(&kd->kernel_threads[i]));
+        cJSON_AddItemToObject(obj, "kernel_threads", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "kernel_threads");
+    }
+
+    /* ebpf_programs: linux.ebpf.EBPF */
+    if (kd->ebpf_programs && kd->ebpf_program_count > 0)
+        ADD_HOOK_ARRAY(obj, "ebpf_programs",
+                       kd->ebpf_programs, kd->ebpf_program_count);
+    else
+        cJSON_AddArrayToObject(obj, "ebpf_programs");
+
+    /* netfilter_hooks: linux.netfilter.Netfilter */
+    if (kd->netfilter_hooks && kd->netfilter_hook_count > 0)
+        ADD_HOOK_ARRAY(obj, "netfilter_hooks",
+                       kd->netfilter_hooks, kd->netfilter_hook_count);
+    else
+        cJSON_AddArrayToObject(obj, "netfilter_hooks");
+
+    /* mount_info: linux.mountinfo.MountInfo */
+    if (kd->mount_info && kd->mount_info_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->mount_info_count; i++)
+            cJSON_AddItemToArray(arr, mount_to_json(&kd->mount_info[i]));
+        cJSON_AddItemToObject(obj, "mount_info", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "mount_info");
+    }
+
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  memscope_to_json  (main entry point)                               */
 /* ------------------------------------------------------------------ */
 cJSON *memscope_to_json(const ScanResult *result)
 {
     cJSON *root = cJSON_CreateObject();
 
-    /* Metadata */
-    cJSON_AddStringToObject(root, "tool",    "memscope");
+    /* ---- Metadata ---- */
+    cJSON_AddStringToObject(root, "tool",    "RootKitChecker");
     cJSON_AddStringToObject(root, "version", MEMSCOPE_VERSION_STR);
     json_add_str(root, "scan_time",  result->scan_time);
     json_add_str(root, "image_path", result->image_path);
 
-    /* Kernel info */
+    /* ---- Kernel info ---- */
     cJSON_AddItemToObject(root, "kernel_info",
                           kernel_info_to_json(&result->kernel));
 
-    /* Summary */
+    /* ---- Summary ---- */
     cJSON *summary = cJSON_CreateObject();
     cJSON_AddNumberToObject(summary, "total_processes",
                             result->process_count);
@@ -166,7 +408,7 @@ cJSON *memscope_to_json(const ScanResult *result)
                             result->hook_count);
     cJSON_AddItemToObject(root, "summary", summary);
 
-    /* Processes */
+    /* ---- Detection results ---- */
     {
         const char *key = "processes";
         if (result->processes && result->process_count > 0)
@@ -175,8 +417,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Hidden processes */
     {
         const char *key = "hidden_processes";
         if (result->hidden_processes && result->hidden_process_count > 0)
@@ -185,8 +425,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Inactive processes */
     {
         const char *key = "inactive_processes";
         if (result->inactive_processes && result->inactive_process_count > 0)
@@ -195,8 +433,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Network connections */
     {
         const char *key = "connections";
         if (result->connections && result->connection_count > 0)
@@ -205,8 +441,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Hidden connections */
     {
         const char *key = "hidden_connections";
         if (result->hidden_connections && result->hidden_connection_count > 0)
@@ -215,8 +449,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Kernel modules */
     {
         const char *key = "modules";
         if (result->modules && result->module_count > 0)
@@ -224,8 +456,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Hidden modules */
     {
         const char *key = "hidden_modules";
         if (result->hidden_modules && result->hidden_module_count > 0)
@@ -234,8 +464,6 @@ cJSON *memscope_to_json(const ScanResult *result)
         else
             cJSON_AddArrayToObject(root, key);
     }
-
-    /* Hooks */
     {
         const char *key = "hooks";
         if (result->hooks && result->hook_count > 0)
@@ -244,7 +472,23 @@ cJSON *memscope_to_json(const ScanResult *result)
             cJSON_AddArrayToObject(root, key);
     }
 
-    /* Errors */
+    /* ---- OS-specific kernel data ---- */
+    const char *os = result->kernel.os_type;
+    if (os && (strcmp(os, "Windows") == 0 || strcmp(os, "windows") == 0)) {
+        cJSON_AddItemToObject(root, "windows_kernel_data",
+                              win_kernel_data_to_json(&result->win_kernel));
+    } else if (os && (strcmp(os, "Linux") == 0 || strcmp(os, "linux") == 0)) {
+        cJSON_AddItemToObject(root, "linux_kernel_data",
+                              lnx_kernel_data_to_json(&result->lnx_kernel));
+    } else {
+        /* Include both sections when OS is unknown */
+        cJSON_AddItemToObject(root, "windows_kernel_data",
+                              win_kernel_data_to_json(&result->win_kernel));
+        cJSON_AddItemToObject(root, "linux_kernel_data",
+                              lnx_kernel_data_to_json(&result->lnx_kernel));
+    }
+
+    /* ---- Errors ---- */
     cJSON *err_arr = cJSON_CreateArray();
     for (int i = 0; i < result->error_count; i++) {
         if (result->errors[i])

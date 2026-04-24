@@ -793,5 +793,269 @@ int windows_full_scan(const char *image_path, ScanResult *result)
         free(hollow);
     }
 
+    /* 10. Kernel data collection (os_info, modules, bigpools,
+     *     memmap, statistics, virtmap) */
+    windows_collect_kernel_data(image_path, &result->win_kernel);
+
+    return 0;
+}
+
+/* ================================================================== */
+/*  Windows kernel data collection functions                           */
+/* ================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_os_info  (windows.info.Info)                       */
+/* ------------------------------------------------------------------ */
+int windows_collect_os_info(const char *image_path, WinKernelData *kd)
+{
+    kd->os_info       = NULL;
+    kd->os_info_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.info.Info", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.info] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    KVRecord *recs = calloc(res->row_count + 1, sizeof(KVRecord));
+    if (!recs) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(recs[r].key,   sizeof(recs[r].key),
+                  row_get(res, &res->rows[r], "Variable"));
+        safe_copy(recs[r].value, sizeof(recs[r].value),
+                  row_get(res, &res->rows[r], "Value"));
+    }
+
+    kd->os_info       = recs;
+    kd->os_info_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_loaded_modules  (windows.modules.Modules)          */
+/* ------------------------------------------------------------------ */
+int windows_collect_loaded_modules(const char *image_path, WinKernelData *kd)
+{
+    kd->loaded_modules      = NULL;
+    kd->loaded_module_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.modules.Modules", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.modules] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    ModuleRecord *mods = calloc(res->row_count + 1, sizeof(ModuleRecord));
+    if (!mods) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(mods[r].name, sizeof(mods[r].name),
+                  row_get(res, &res->rows[r], "Name"));
+        mods[r].base = parse_u64(row_get(res, &res->rows[r], "Base"));
+        mods[r].size = parse_u64(row_get(res, &res->rows[r], "Size"));
+        safe_copy(mods[r].path, sizeof(mods[r].path),
+                  row_get(res, &res->rows[r], "Path"));
+        safe_copy(mods[r].source, sizeof(mods[r].source),
+                  "windows.modules");
+    }
+
+    kd->loaded_modules      = mods;
+    kd->loaded_module_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_big_pools  (windows.bigpools.BigPools)             */
+/* ------------------------------------------------------------------ */
+int windows_collect_big_pools(const char *image_path, WinKernelData *kd)
+{
+    kd->big_pools      = NULL;
+    kd->big_pool_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.bigpools.BigPools", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.bigpools] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    BigPoolRecord *pools = calloc(res->row_count + 1, sizeof(BigPoolRecord));
+    if (!pools) { pybridge_free_result(res); return -1; }
+
+    /* Known legitimate pool tags (partial list for heuristic check) */
+    static const char *known_tags[] = {
+        "MmSt", "Ntff", "FMfn", "File", "Driv", "ObNm",
+        "Proc", "Thre", "Even", "Muta", "Sema", "Port",
+        "AlPC", "Pipe", "Recy", "Vad ", "VadS", "VadL",
+        NULL
+    };
+
+    for (int r = 0; r < res->row_count; r++) {
+        BigPoolRecord *p = &pools[r];
+        p->virtual_addr = parse_u64(row_get(res, &res->rows[r], "PoolBigPageTable"));
+        p->size         = parse_u64(row_get(res, &res->rows[r], "AllocSize"));
+        const char *tag = row_get(res, &res->rows[r], "Tag");
+        safe_copy(p->tag,  sizeof(p->tag),  tag);
+        safe_copy(p->type, sizeof(p->type),
+                  row_get(res, &res->rows[r], "PoolType"));
+
+        /* Heuristic: mark as suspicious if tag not in known list */
+        p->suspicious = true;
+        for (int t = 0; known_tags[t]; t++) {
+            if (strncmp(p->tag, known_tags[t], 4) == 0) {
+                p->suspicious = false;
+                break;
+            }
+        }
+    }
+
+    kd->big_pools      = pools;
+    kd->big_pool_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_memory_map  (windows.memmap.Memmap)                */
+/* ------------------------------------------------------------------ */
+int windows_collect_memory_map(const char *image_path, WinKernelData *kd)
+{
+    kd->memory_map       = NULL;
+    kd->memory_map_count = 0;
+
+    /* Use PID 0 (System) to get kernel memory map */
+    const char *args[] = {"pid=0", NULL};
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.memmap.Memmap", args);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.memmap] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    MemRegionRecord *regions = calloc(res->row_count + 1,
+                                      sizeof(MemRegionRecord));
+    if (!regions) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        MemRegionRecord *reg = &regions[r];
+        reg->start = parse_u64(row_get(res, &res->rows[r], "Virtual"));
+        reg->size  = parse_u64(row_get(res, &res->rows[r], "Size"));
+        reg->end   = reg->start + reg->size;
+        safe_copy(reg->name, sizeof(reg->name),
+                  row_get(res, &res->rows[r], "Mapped File"));
+        reg->pid   = parse_u64(row_get(res, &res->rows[r], "PID"));
+    }
+
+    kd->memory_map       = regions;
+    kd->memory_map_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_statistics  (windows.statistics.Statistics)        */
+/* ------------------------------------------------------------------ */
+int windows_collect_statistics(const char *image_path, WinKernelData *kd)
+{
+    kd->statistics       = NULL;
+    kd->statistics_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.statistics.Statistics", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.statistics] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    KVRecord *recs = calloc(res->row_count + 1, sizeof(KVRecord));
+    if (!recs) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        safe_copy(recs[r].key,   sizeof(recs[r].key),
+                  row_get(res, &res->rows[r], "Stat"));
+        safe_copy(recs[r].value, sizeof(recs[r].value),
+                  row_get(res, &res->rows[r], "Count"));
+        safe_copy(recs[r].extra, sizeof(recs[r].extra),
+                  row_get(res, &res->rows[r], "Size"));
+    }
+
+    kd->statistics       = recs;
+    kd->statistics_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_virtual_map  (windows.virtmap.VirtMap)             */
+/* ------------------------------------------------------------------ */
+int windows_collect_virtual_map(const char *image_path, WinKernelData *kd)
+{
+    kd->virtual_map       = NULL;
+    kd->virtual_map_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.virtmap.VirtMap", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.virtmap] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    MemRegionRecord *regions = calloc(res->row_count + 1,
+                                      sizeof(MemRegionRecord));
+    if (!regions) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        MemRegionRecord *reg = &regions[r];
+        reg->start = parse_u64(row_get(res, &res->rows[r], "Start"));
+        reg->end   = parse_u64(row_get(res, &res->rows[r], "End"));
+        reg->size  = (reg->end > reg->start) ? (reg->end - reg->start) : 0;
+        safe_copy(reg->name, sizeof(reg->name),
+                  row_get(res, &res->rows[r], "Name"));
+    }
+
+    kd->virtual_map       = regions;
+    kd->virtual_map_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_kernel_data  (aggregates all 6 above)              */
+/* ------------------------------------------------------------------ */
+int windows_collect_kernel_data(const char *image_path, WinKernelData *kd)
+{
+    memset(kd, 0, sizeof(*kd));
+
+    windows_collect_os_info(image_path, kd);
+    windows_collect_loaded_modules(image_path, kd);
+    windows_collect_big_pools(image_path, kd);
+    windows_collect_memory_map(image_path, kd);
+    windows_collect_statistics(image_path, kd);
+    windows_collect_virtual_map(image_path, kd);
+
     return 0;
 }

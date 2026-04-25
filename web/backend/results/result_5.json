@@ -1,0 +1,47 @@
+{
+	"tool":	"RootKitChecker",
+	"version":	"1.1.0",
+	"scan_time":	"2026-04-25T09:07:24Z",
+	"image_path":	"/home/ubuntu/RootKitChecker/web/backend/uploads/20260425_050724_20260425_040605_test_image.raw",
+	"kernel_info":	{
+		"os_type":	"Linux",
+		"os_version":	null,
+		"kernel_version":	null,
+		"architecture":	"x86_64",
+		"build_str":	null,
+		"image_type":	"Linux Memory Image",
+		"kdbg_offset":	null,
+		"dtb":	null
+	},
+	"summary":	{
+		"total_processes":	0,
+		"hidden_processes":	0,
+		"inactive_processes":	0,
+		"total_connections":	0,
+		"hidden_connections":	0,
+		"total_modules":	0,
+		"hidden_modules":	0,
+		"hook_count":	0
+	},
+	"processes":	[],
+	"hidden_processes":	[],
+	"inactive_processes":	[],
+	"connections":	[],
+	"hidden_connections":	[],
+	"modules":	[],
+	"hidden_modules":	[],
+	"hooks":	[],
+	"linux_kernel_data":	{
+		"kallsyms":	[],
+		"iomem":	[],
+		"vmcoreinfo":	[],
+		"kernel_messages":	[],
+		"boot_time":	null,
+		"loaded_modules":	[],
+		"kernel_threads":	[],
+		"ebpf_programs":	[],
+		"netfilter_hooks":	[],
+		"mount_info":	[]
+	},
+	"errors":	[]
+}

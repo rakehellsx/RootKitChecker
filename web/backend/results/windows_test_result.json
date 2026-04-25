@@ -15,15 +15,37 @@
       "pid": 4444,
       "name": "malware.exe",
       "ppid": 1234,
-      "source": "psscan only",
-      "offset": "0xffff8a0012345678"
+      "offset": "0xffff8a0012345678",
+      "create_time": "2026-04-25 09:30:00",
+      "exit_time": null,
+      "threads": 3,
+      "handles": 100,
+      "session_id": 1,
+      "integrity": "High",
+      "image_path": "C:\\Users\\Admin\\AppData\\Local\\Temp\\malware.exe",
+      "cmdline": "malware.exe --connect 10.0.0.1:4444",
+      "in_pslist": false,
+      "in_psscan": true,
+      "in_psxview": true,
+      "source": "psscan only"
     },
     {
       "pid": 5555,
       "name": "rootkit_svc.exe",
       "ppid": 4444,
-      "source": "psxview only",
-      "offset": "0xffff8a0087654321"
+      "offset": "0xffff8a0087654321",
+      "create_time": "2026-04-25 09:31:00",
+      "exit_time": null,
+      "threads": 1,
+      "handles": 50,
+      "session_id": 0,
+      "integrity": "System",
+      "image_path": "C:\\Windows\\System32\\rootkit_svc.exe",
+      "cmdline": "rootkit_svc.exe -s",
+      "in_pslist": false,
+      "in_psscan": false,
+      "in_psxview": true,
+      "source": "psxview only"
     }
   ],
   "inactive_processes": [
@@ -138,12 +160,32 @@
   "hidden_connections": [
     {
       "pid": 4444,
+      "process": "malware.exe",
       "proto": "TCPv4",
       "local_addr": "192.168.1.50",
       "local_port": 4444,
       "remote_addr": "10.0.0.1",
       "remote_port": 54321,
       "state": "ESTABLISHED",
+      "create_time": "2026-04-25 09:31:05",
+      "offset": "0xffff8a00ccddee00",
+      "in_netscan": true,
+      "in_netstat": false,
+      "source": "netscan only"
+    },
+    {
+      "pid": 5555,
+      "process": "rootkit_svc.exe",
+      "proto": "TCPv4",
+      "local_addr": "0.0.0.0",
+      "local_port": 8888,
+      "remote_addr": "0.0.0.0",
+      "remote_port": 0,
+      "state": "LISTEN",
+      "create_time": "2026-04-25 09:31:10",
+      "offset": "0xffff8a00ddeeff00",
+      "in_netscan": true,
+      "in_netstat": false,
       "source": "netscan only"
     }
   ],

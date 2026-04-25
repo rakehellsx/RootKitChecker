@@ -1,0 +1,273 @@
+{
+  "image": "/tmp/test_win10.vmem",
+  "os": "windows",
+  "arch": "AMD64",
+  "scan_time": "2026-04-25T10:05:00",
+  "summary": {
+    "hidden_process_count": 2,
+    "ssdt_hook_count": 3,
+    "hidden_connection_count": 1,
+    "hidden_module_count": 1,
+    "inactive_process_count": 5
+  },
+  "hidden_processes": [
+    {
+      "pid": 4444,
+      "name": "malware.exe",
+      "ppid": 1234,
+      "source": "psscan only",
+      "offset": "0xffff8a0012345678"
+    },
+    {
+      "pid": 5555,
+      "name": "rootkit_svc.exe",
+      "ppid": 4444,
+      "source": "psxview only",
+      "offset": "0xffff8a0087654321"
+    }
+  ],
+  "inactive_processes": [
+    {
+      "pid": 1001,
+      "name": "cmd.exe",
+      "ppid": 4444,
+      "exit_time": "2026-04-25 09:45:00",
+      "offset": "0xffff8a00aabbccdd"
+    },
+    {
+      "pid": 1002,
+      "name": "powershell.exe",
+      "ppid": 4444,
+      "exit_time": "2026-04-25 09:50:00",
+      "offset": "0xffff8a00bbccddee"
+    }
+  ],
+  "processes": [
+    {
+      "pid": 4,
+      "name": "System",
+      "ppid": 0,
+      "threads": 200,
+      "handles": 5000,
+      "create_time": "2026-04-25 08:00:00",
+      "offset": "0xffff8a0000001000"
+    },
+    {
+      "pid": 688,
+      "name": "lsass.exe",
+      "ppid": 580,
+      "threads": 10,
+      "handles": 800,
+      "create_time": "2026-04-25 08:00:10",
+      "offset": "0xffff8a0000002000"
+    },
+    {
+      "pid": 1234,
+      "name": "explorer.exe",
+      "ppid": 688,
+      "threads": 50,
+      "handles": 1200,
+      "create_time": "2026-04-25 08:05:00",
+      "offset": "0xffff8a0000003000"
+    },
+    {
+      "pid": 4444,
+      "name": "malware.exe",
+      "ppid": 1234,
+      "threads": 3,
+      "handles": 100,
+      "create_time": "2026-04-25 09:30:00",
+      "offset": "0xffff8a0012345678"
+    }
+  ],
+  "ssdt_hooks": [
+    {
+      "index": 41,
+      "name": "NtCreateProcess",
+      "address": "0xfffff80012345678",
+      "module": "rootkit.sys",
+      "hooked": true
+    },
+    {
+      "index": 42,
+      "name": "NtCreateThread",
+      "address": "0xfffff80012345690",
+      "module": "rootkit.sys",
+      "hooked": true
+    },
+    {
+      "index": 80,
+      "name": "NtQuerySystemInformation",
+      "address": "0xfffff800123456b0",
+      "module": "rootkit.sys",
+      "hooked": true
+    }
+  ],
+  "hidden_modules": [
+    {
+      "name": "rootkit.sys",
+      "base": "0xfffff80012300000",
+      "size": 65536,
+      "source": "modscan only"
+    }
+  ],
+  "network_connections": [
+    {
+      "pid": 4444,
+      "process": "malware.exe",
+      "proto": "TCPv4",
+      "local_addr": "192.168.1.50",
+      "local_port": 49152,
+      "remote_addr": "10.0.0.1",
+      "remote_port": 4444,
+      "state": "ESTABLISHED",
+      "create_time": "2026-04-25 09:31:00"
+    },
+    {
+      "pid": 688,
+      "process": "lsass.exe",
+      "proto": "TCPv4",
+      "local_addr": "0.0.0.0",
+      "local_port": 445,
+      "remote_addr": "0.0.0.0",
+      "remote_port": 0,
+      "state": "LISTEN",
+      "create_time": "2026-04-25 08:00:10"
+    }
+  ],
+  "hidden_connections": [
+    {
+      "pid": 4444,
+      "proto": "TCPv4",
+      "local_addr": "192.168.1.50",
+      "local_port": 4444,
+      "remote_addr": "10.0.0.1",
+      "remote_port": 54321,
+      "state": "ESTABLISHED",
+      "source": "netscan only"
+    }
+  ],
+  "driver_irps": [
+    {
+      "driver_name": "\\Driver\\rootkit",
+      "irp_index": 0,
+      "irp_name": "IRP_MJ_CREATE",
+      "handler_addr": "0xfffff80012345678",
+      "handler_module": "rootkit.sys",
+      "hooked": true
+    },
+    {
+      "driver_name": "\\Driver\\rootkit",
+      "irp_index": 3,
+      "irp_name": "IRP_MJ_READ",
+      "handler_addr": "0xfffff80012345700",
+      "handler_module": "rootkit.sys",
+      "hooked": true
+    }
+  ],
+  "callbacks": [
+    {
+      "callback_type": "CreateProcessNotifyRoutine",
+      "callback_addr": "0xfffff80012345800",
+      "module": "rootkit.sys",
+      "symbol": "rootkit+0x1800",
+      "detail": ""
+    },
+    {
+      "callback_type": "LoadImageNotifyRoutine",
+      "callback_addr": "0xfffff80012345900",
+      "module": "rootkit.sys",
+      "symbol": "rootkit+0x1900",
+      "detail": ""
+    }
+  ],
+  "timers": [
+    {
+      "offset": "0xffff8a0099887766",
+      "due_time": "0x0000000100000000",
+      "period": 5000,
+      "signaled": 0,
+      "routine_addr": "0xfffff80012345a00",
+      "routine_module": "rootkit.sys",
+      "routine_symbol": "rootkit+0x1a00"
+    }
+  ],
+  "windows_kernel_data": {
+    "os_info": [
+      {
+        "key": "Kernel Base",
+        "value": "0xfffff80010000000"
+      },
+      {
+        "key": "DTB",
+        "value": "0x001aa000"
+      },
+      {
+        "key": "Build",
+        "value": "Windows 10 19041"
+      },
+      {
+        "key": "Architecture",
+        "value": "AMD64"
+      }
+    ],
+    "loaded_modules": [
+      {
+        "name": "ntoskrnl.exe",
+        "base": "0xfffff80010000000",
+        "size": 10485760,
+        "path": "\\SystemRoot\\system32\\ntoskrnl.exe"
+      },
+      {
+        "name": "hal.dll",
+        "base": "0xfffff80011000000",
+        "size": 524288,
+        "path": "\\SystemRoot\\system32\\hal.dll"
+      },
+      {
+        "name": "rootkit.sys",
+        "base": "0xfffff80012300000",
+        "size": 65536,
+        "path": "\\SystemRoot\\System32\\drivers\\rootkit.sys"
+      }
+    ],
+    "big_pools": [
+      {
+        "tag": "MmSt",
+        "va": "0xffff8a0000100000",
+        "size": 2097152,
+        "pool_type": "NonPaged",
+        "suspicious": false
+      },
+      {
+        "tag": "Hack",
+        "va": "0xffff8a0012300000",
+        "size": 65536,
+        "pool_type": "NonPaged",
+        "suspicious": true
+      }
+    ],
+    "statistics": [
+      {
+        "key": "Total Physical Memory",
+        "value": "8589934592"
+      },
+      {
+        "key": "Available Pages",
+        "value": "1048576"
+      },
+      {
+        "key": "Modified Pages",
+        "value": "32768"
+      }
+    ],
+    "unloaded_modules": [
+      {
+        "name": "loader.sys",
+        "start_addr": "0xfffff80012400000",
+        "end_addr": "0xfffff80012410000",
+        "unload_time": "2026-04-25 09:29:00"
+      }
+    ]
+  }
+}

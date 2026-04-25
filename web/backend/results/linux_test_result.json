@@ -1,0 +1,291 @@
+{
+  "image": "/tmp/test_linux.lime",
+  "os": "linux",
+  "arch": "x86_64",
+  "scan_time": "2026-04-25T10:00:00",
+  "summary": {
+    "hidden_process_count": 3,
+    "syscall_hook_count": 2,
+    "idt_hook_count": 0,
+    "hidden_connection_count": 1,
+    "hidden_module_count": 1,
+    "cred_anomaly_count": 1
+  },
+  "hidden_processes_linux": [
+    {
+      "pid": 1337,
+      "name": "backdoor",
+      "ppid": 1,
+      "source": "psscan only"
+    },
+    {
+      "pid": 2048,
+      "name": "rootkit_agent",
+      "ppid": 1,
+      "source": "psscan only"
+    },
+    {
+      "pid": 3000,
+      "name": "nc",
+      "ppid": 1337,
+      "source": "pidhashtable only"
+    }
+  ],
+  "processes_linux": [
+    {
+      "pid": 1,
+      "ppid": 0,
+      "name": "systemd",
+      "uid": 0,
+      "gid": 0,
+      "state": "S",
+      "start_time": "2026-04-25 08:00:00"
+    },
+    {
+      "pid": 100,
+      "ppid": 1,
+      "name": "sshd",
+      "uid": 0,
+      "gid": 0,
+      "state": "S",
+      "start_time": "2026-04-25 08:00:05"
+    },
+    {
+      "pid": 200,
+      "ppid": 1,
+      "name": "nginx",
+      "uid": 33,
+      "gid": 33,
+      "state": "S",
+      "start_time": "2026-04-25 08:01:00"
+    },
+    {
+      "pid": 1337,
+      "name": "backdoor",
+      "ppid": 1,
+      "uid": 0,
+      "gid": 0,
+      "state": "S",
+      "start_time": "2026-04-25 09:30:00"
+    }
+  ],
+  "syscall_hooks": [
+    {
+      "index": 59,
+      "address": "0xffffffffc0a12340",
+      "module": "diamorphine.ko",
+      "symbol": "diamorphine+0x340"
+    },
+    {
+      "index": 78,
+      "address": "0xffffffffc0a12480",
+      "module": "diamorphine.ko",
+      "symbol": "diamorphine+0x480"
+    }
+  ],
+  "idt_hooks": [],
+  "afinfo_hooks": [
+    {
+      "symbol": "tcp4_seq_ops.show",
+      "address": "0xffffffffc0a12600",
+      "module": "diamorphine.ko"
+    }
+  ],
+  "hidden_modules_linux": [
+    {
+      "name": "diamorphine",
+      "base": "0xffffffffc0a10000",
+      "size": 16384,
+      "source": "modxview"
+    }
+  ],
+  "hidden_connections": [
+    {
+      "pid": 1337,
+      "proto": "TCP",
+      "local_addr": "0.0.0.0",
+      "local_port": 4444,
+      "foreign_addr": "192.168.1.100",
+      "foreign_port": 54321,
+      "state": "ESTABLISHED",
+      "source": "netstat only"
+    }
+  ],
+  "network_connections_linux": [
+    {
+      "pid": 100,
+      "process": "sshd",
+      "proto": "TCP",
+      "local_addr": "0.0.0.0",
+      "local_port": 22,
+      "remote_addr": "0.0.0.0",
+      "remote_port": 0,
+      "state": "LISTEN"
+    },
+    {
+      "pid": 200,
+      "process": "nginx",
+      "proto": "TCP",
+      "local_addr": "0.0.0.0",
+      "local_port": 80,
+      "remote_addr": "0.0.0.0",
+      "remote_port": 0,
+      "state": "LISTEN"
+    },
+    {
+      "pid": 1337,
+      "process": "backdoor",
+      "proto": "TCP",
+      "local_addr": "0.0.0.0",
+      "local_port": 4444,
+      "remote_addr": "192.168.1.100",
+      "remote_port": 54321,
+      "state": "ESTABLISHED"
+    }
+  ],
+  "cred_anomalies": [
+    {
+      "pid": 1337,
+      "name": "backdoor",
+      "uid": 0,
+      "gid": 0,
+      "detail": "UID=0 but not in expected privileged list"
+    }
+  ],
+  "netfilter_hooks": [
+    {
+      "proto": "IPv4",
+      "table": "filter",
+      "chain": "INPUT",
+      "priority": -200,
+      "handler": "0xffffffffc0a12700",
+      "module": "diamorphine.ko"
+    }
+  ],
+  "tty_hooks": [],
+  "keyboard_hooks": [],
+  "linux_kernel_data": {
+    "vmcoreinfo": [
+      {
+        "key": "OSRELEASE",
+        "value": "6.1.0-1022-oem"
+      },
+      {
+        "key": "PAGESIZE",
+        "value": "4096"
+      },
+      {
+        "key": "SYMBOL(init_uts_ns)",
+        "value": "0xffffffff82a3b2c0"
+      }
+    ],
+    "boot_time": "2026-04-25 08:00:00",
+    "loaded_modules": [
+      {
+        "name": "ext4",
+        "base": "0xffffffffc0800000",
+        "size": 786432
+      },
+      {
+        "name": "xfs",
+        "base": "0xffffffffc0900000",
+        "size": 1048576
+      },
+      {
+        "name": "nf_conntrack",
+        "base": "0xffffffffc0a00000",
+        "size": 131072
+      }
+    ],
+    "kernel_threads": [
+      {
+        "pid": 2,
+        "name": "kthreadd",
+        "state": "S"
+      },
+      {
+        "pid": 3,
+        "name": "rcu_gp",
+        "state": "I"
+      },
+      {
+        "pid": 9,
+        "name": "mm_percpu_wq",
+        "state": "I"
+      }
+    ],
+    "ebpf_programs": [
+      {
+        "id": 1,
+        "type": "kprobe",
+        "name": "sys_enter_hook",
+        "tag": "a1b2c3d4e5f60718",
+        "load_time": "2026-04-25 09:31:00"
+      }
+    ],
+    "netfilter_hooks": [
+      {
+        "proto": "IPv4",
+        "table": "filter",
+        "chain": "INPUT",
+        "priority": -200,
+        "handler": "0xffffffffc0a12700",
+        "module": "diamorphine.ko"
+      }
+    ],
+    "iomem": [
+      {
+        "start": "0x0000000000000000",
+        "end": "0x000000000009ffff",
+        "name": "System RAM"
+      },
+      {
+        "start": "0x0000000000100000",
+        "end": "0x000000007fffffff",
+        "name": "System RAM"
+      }
+    ],
+    "mount_info": [
+      {
+        "mount_id": 1,
+        "source": "sysfs",
+        "target": "/sys",
+        "fstype": "sysfs",
+        "options": "rw,nosuid,nodev,noexec"
+      },
+      {
+        "mount_id": 2,
+        "source": "/dev/sda1",
+        "target": "/",
+        "fstype": "ext4",
+        "options": "rw,relatime"
+      }
+    ],
+    "kallsyms": [
+      {
+        "name": "sys_call_table",
+        "address": "0xffffffff82200300",
+        "type": "R"
+      },
+      {
+        "name": "tcp4_seq_ops",
+        "address": "0xffffffff82a1b400",
+        "type": "R"
+      }
+    ],
+    "kernel_messages": [
+      {
+        "timestamp": "0.000000",
+        "facility": "kern",
+        "level": "info",
+        "message": "Linux version 6.1.0-1022-oem"
+      },
+      {
+        "timestamp": "9876.543210",
+        "facility": "kern",
+        "level": "warning",
+        "message": "diamorphine: module loaded"
+      }
+    ]
+  }
+}

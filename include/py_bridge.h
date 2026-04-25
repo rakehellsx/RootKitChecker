@@ -67,6 +67,18 @@ PluginResult *pybridge_run_plugin(const char *image_path,
 void pybridge_free_result(PluginResult *res);
 
 /**
+ * Set the Volatility3 symbol table path.
+ *
+ * This path is forwarded to vol_runner.py via the --symbols argument and
+ * also exported as the VOLATILITY_SYMBOLS environment variable so that
+ * Volatility3's automagic layer can locate ISF files automatically.
+ *
+ * @param symbols_path  Directory containing symbol JSON/XZ files, or path
+ *                      to a single ISF .json file.  Pass NULL to clear.
+ */
+void pybridge_set_symbols_path(const char *symbols_path);
+
+/**
  * Detect the OS of a memory image by probing windows.info / linux.pslist.
  * Returns "windows", "linux", "macos", or "unknown".
  */

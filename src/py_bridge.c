@@ -8,6 +8,14 @@
  *   ABI mismatches and keeps the C binary independent of the Python
  *   installation, while still providing a clean C API to the rest of
  *   the tool.
+ *
+ * Symbol table support:
+ *   pybridge_set_symbols_path() stores the user-supplied path and:
+ *     1. Exports it as VOLATILITY_SYMBOLS so that Volatility3's automagic
+ *        layer picks it up automatically.
+ *     2. Appends "--symbols <path>" to every vol_runner.py invocation so
+ *        that vol_runner.py can also configure it programmatically via
+ *        volatility3.framework.constants.SYMBOL_BASEPATHS.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -29,9 +37,10 @@
 /*  Internal globals                                                    */
 /* ------------------------------------------------------------------ */
 
-static char g_python_exe[1024]  = "python3";
-static char g_runner_script[2048] = "";
-static bool g_initialized = false;
+static char g_python_exe[1024]     = "python3";
+static char g_runner_script[2048]  = "";
+static char g_symbols_path[4096]   = "";   /* empty = not set */
+static bool g_initialized          = false;
 
 /* ------------------------------------------------------------------ */
 /*  Helper: read all data from a file descriptor into a heap buffer    */
@@ -93,6 +102,61 @@ static char *run_command(const char *const argv[])
 }
 
 /* ------------------------------------------------------------------ */
+/*  Helper: build argv with optional --symbols argument                */
+/*                                                                      */
+/*  base_argv must be NULL-terminated.                                  */
+/*  extra_args may be NULL.                                             */
+/*  Returns heap-allocated argv array; caller must free().             */
+/* ------------------------------------------------------------------ */
+static const char **build_argv(const char *const base_argv[],
+                                const char **extra_args)
+{
+    /* Count base args */
+    int base_count = 0;
+    while (base_argv[base_count]) base_count++;
+
+    /* Count extra args */
+    int extra_count = 0;
+    if (extra_args) {
+        while (extra_args[extra_count]) extra_count++;
+    }
+
+    /* Symbols slot: "--symbols" + path = 2 extra slots (if set) */
+    int sym_slots = (g_symbols_path[0] != '\0') ? 2 : 0;
+
+    /* Total: base + sym_slots + ("--args" + extras if any) + NULL */
+    int total = base_count
+              + sym_slots
+              + (extra_count > 0 ? 1 + extra_count : 0)
+              + 1;
+
+    const char **argv = calloc(total, sizeof(char *));
+    if (!argv) return NULL;
+
+    int idx = 0;
+
+    /* Copy base args */
+    for (int i = 0; i < base_count; i++)
+        argv[idx++] = base_argv[i];
+
+    /* Append --symbols <path> if configured */
+    if (g_symbols_path[0] != '\0') {
+        argv[idx++] = "--symbols";
+        argv[idx++] = g_symbols_path;
+    }
+
+    /* Append --args key=val ... if present */
+    if (extra_count > 0) {
+        argv[idx++] = "--args";
+        for (int i = 0; i < extra_count; i++)
+            argv[idx++] = extra_args[i];
+    }
+
+    argv[idx] = NULL;
+    return argv;
+}
+
+/* ------------------------------------------------------------------ */
 /*  pybridge_init                                                       */
 /* ------------------------------------------------------------------ */
 int pybridge_init(const char *venv_path)
@@ -103,7 +167,6 @@ int pybridge_init(const char *venv_path)
     if (venv_path && *venv_path) {
         snprintf(g_python_exe, sizeof(g_python_exe),
                  "%s/bin/python", venv_path);
-        /* verify it exists */
         if (access(g_python_exe, X_OK) != 0) {
             snprintf(g_python_exe, sizeof(g_python_exe),
                      "%s/bin/python3", venv_path);
@@ -112,24 +175,19 @@ int pybridge_init(const char *venv_path)
         strncpy(g_python_exe, "python3", sizeof(g_python_exe) - 1);
     }
 
-    /* Locate vol_runner.py relative to this binary's directory.
-     * We use /proc/self/exe to find the binary, then look for
-     * scripts/vol_runner.py in the project root.                     */
+    /* Locate vol_runner.py relative to this binary's directory */
     char exe_path[2048] = {0};
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len > 0) {
         exe_path[len] = '\0';
-        /* strip filename */
         char *slash = strrchr(exe_path, '/');
         if (slash) *slash = '\0';
-        /* go up one level (from build/ to project root) */
         slash = strrchr(exe_path, '/');
         if (slash) *slash = '\0';
         snprintf(g_runner_script, sizeof(g_runner_script),
                  "%s/scripts/vol_runner.py", exe_path);
     }
 
-    /* Fallback: look next to the binary */
     if (access(g_runner_script, R_OK) != 0) {
         snprintf(g_runner_script, sizeof(g_runner_script),
                  "scripts/vol_runner.py");
@@ -148,13 +206,32 @@ void pybridge_fini(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  pybridge_set_symbols_path                                           */
+/* ------------------------------------------------------------------ */
+void pybridge_set_symbols_path(const char *symbols_path)
+{
+    if (!symbols_path || *symbols_path == '\0') {
+        g_symbols_path[0] = '\0';
+        unsetenv("VOLATILITY_SYMBOLS");
+        return;
+    }
+
+    strncpy(g_symbols_path, symbols_path, sizeof(g_symbols_path) - 1);
+    g_symbols_path[sizeof(g_symbols_path) - 1] = '\0';
+
+    /* Also export as environment variable so that Volatility3's automagic
+     * layer picks it up even before vol_runner.py processes --symbols.   */
+    setenv("VOLATILITY_SYMBOLS", g_symbols_path, 1 /* overwrite */);
+}
+
+/* ------------------------------------------------------------------ */
 /*  pybridge_detect_os                                                  */
 /* ------------------------------------------------------------------ */
 const char *pybridge_detect_os(const char *image_path)
 {
     static char os_buf[32] = "unknown";
 
-    const char *argv[] = {
+    const char *base_argv[] = {
         g_python_exe,
         g_runner_script,
         "--image", image_path,
@@ -162,7 +239,11 @@ const char *pybridge_detect_os(const char *image_path)
         NULL
     };
 
+    const char **argv = build_argv(base_argv, NULL);
+    if (!argv) return os_buf;
+
     char *output = run_command(argv);
+    free(argv);
     if (!output) return os_buf;
 
     cJSON *root = cJSON_Parse(output);
@@ -184,40 +265,26 @@ PluginResult *pybridge_run_plugin(const char *image_path,
                                   const char *plugin_name,
                                   const char **extra_args)
 {
-    /* Build argv dynamically */
     const char *base_argv[] = {
         g_python_exe,
         g_runner_script,
-        "--image", image_path,
+        "--image",  image_path,
         "--plugin", plugin_name,
         NULL
     };
 
-    /* Count extra args */
-    int extra_count = 0;
-    if (extra_args) {
-        while (extra_args[extra_count]) extra_count++;
+    const char **argv = build_argv(base_argv, extra_args);
+
+    PluginResult *result = calloc(1, sizeof(PluginResult));
+    if (!result) { free(argv); return NULL; }
+
+    if (!argv) {
+        result->error = strdup("Failed to allocate argv");
+        return result;
     }
-
-    /* Allocate argv array: base(6) + "--args" + extras + NULL */
-    int total = 6 + (extra_count > 0 ? 1 + extra_count : 0) + 1;
-    const char **argv = calloc(total, sizeof(char *));
-    if (!argv) return NULL;
-
-    int idx = 0;
-    for (int i = 0; base_argv[i]; i++) argv[idx++] = base_argv[i];
-
-    if (extra_count > 0) {
-        argv[idx++] = "--args";
-        for (int i = 0; i < extra_count; i++) argv[idx++] = extra_args[i];
-    }
-    argv[idx] = NULL;
 
     char *output = run_command(argv);
     free(argv);
-
-    PluginResult *result = calloc(1, sizeof(PluginResult));
-    if (!result) { free(output); return NULL; }
 
     if (!output) {
         result->error = strdup("Failed to run vol_runner.py");
@@ -263,13 +330,11 @@ PluginResult *pybridge_run_plugin(const char *image_path,
             cJSON *row_obj = cJSON_GetArrayItem(rows_arr, r);
             PluginRow *row = &result->rows[r];
 
-            /* depth */
             cJSON *depth_item = cJSON_GetObjectItemCaseSensitive(
                 row_obj, "__depth__");
             row->depth = cJSON_IsNumber(depth_item)
                          ? (int)depth_item->valuedouble : 0;
 
-            /* columns */
             row->col_count = result->col_count;
             for (int c = 0; c < result->col_count && c < MAX_COLUMNS; c++) {
                 cJSON *cell = cJSON_GetObjectItemCaseSensitive(

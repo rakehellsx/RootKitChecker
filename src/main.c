@@ -1,22 +1,24 @@
 /**
- * main.c  –  memscope: Volatility3-based memory forensics tool
+ * main.c  –  RootKitChecker: Volatility3-based memory forensics tool
  *
  * Usage:
  *   memscope -i <image_path> [-o <output_file>] [-v <venv_path>]
- *            [--os windows|linux|auto] [--pretty] [--no-net]
- *            [--no-modules] [--no-hooks]
+ *            [--os windows|linux|auto] [--symbols <path>]
+ *            [--pretty] [--no-net] [--no-modules] [--no-hooks]
  *
  * Options:
- *   -i <path>        Memory image file path (required)
- *   -o <path>        Output JSON file (default: stdout)
- *   -v <path>        Python virtualenv directory
- *   --os <type>      Force OS type: windows, linux, auto (default: auto)
- *   --pretty         Pretty-print JSON output
- *   --no-net         Skip network connection analysis
- *   --no-modules     Skip kernel module analysis
- *   --no-hooks       Skip hook / rootkit detection
- *   --version        Print version and exit
- *   -h, --help       Show this help
+ *   -i <path>          Memory image file path (required)
+ *   -o <path>          Output JSON file (default: stdout)
+ *   -v <path>          Python virtualenv directory
+ *   --os <type>        Force OS type: windows, linux, auto (default: auto)
+ *   --symbols <path>   Path to Volatility3 symbol table directory or ISF file
+ *                      (overrides VOLATILITY_SYMBOLS env var)
+ *   --pretty           Pretty-print JSON output
+ *   --no-net           Skip network connection analysis
+ *   --no-modules       Skip kernel module analysis
+ *   --no-hooks         Skip hook / rootkit detection
+ *   --version          Print version and exit
+ *   -h, --help         Show this help
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -85,12 +87,10 @@ int memscope_scan(const char *image_path, ScanResult *result)
 {
     memset(result, 0, sizeof(*result));
 
-    /* Record scan time */
     time_t now = time(NULL);
     struct tm *tm_info = gmtime(&now);
     strftime(result->scan_time, sizeof(result->scan_time),
              "%Y-%m-%dT%H:%M:%SZ", tm_info);
-
     strncpy(result->image_path, image_path,
             sizeof(result->image_path) - 1);
 
@@ -125,7 +125,8 @@ typedef struct {
     char   image_path[2048];
     char   output_path[2048];
     char   venv_path[2048];
-    char   os_override[16];   /* "windows", "linux", "auto" */
+    char   os_override[16];    /* "windows", "linux", "auto" */
+    char   symbols_path[4096]; /* Volatility3 symbol table path */
     bool   pretty;
     bool   skip_net;
     bool   skip_modules;
@@ -138,23 +139,44 @@ static void print_usage(const char *prog)
         "Usage: %s -i <image_path> [options]\n"
         "\n"
         "Options:\n"
-        "  -i <path>        Memory image file path (required)\n"
-        "  -o <path>        Output JSON file (default: stdout)\n"
-        "  -v <path>        Python virtualenv directory\n"
-        "  --os <type>      Force OS: windows | linux | auto (default: auto)\n"
-        "  --pretty         Pretty-print JSON\n"
-        "  --no-net         Skip network analysis\n"
-        "  --no-modules     Skip module analysis\n"
-        "  --no-hooks       Skip hook/rootkit detection\n"
-        "  --version        Print version and exit\n"
-        "  -h, --help       Show this help\n"
+        "  -i <path>          Memory image file path (required)\n"
+        "  -o <path>          Output JSON file (default: stdout)\n"
+        "  -v <path>          Python virtualenv directory\n"
+        "                     (overrides MEMSCOPE_VENV env var)\n"
+        "  --os <type>        Force OS: windows | linux | auto (default: auto)\n"
+        "  --symbols <path>   Volatility3 symbol table directory or ISF file\n"
+        "                     (overrides VOLATILITY_SYMBOLS env var)\n"
+        "                     For Windows: directory containing .json.xz PDB files\n"
+        "                     For Linux:   directory containing kernel ISF .json files\n"
+        "  --pretty           Pretty-print JSON\n"
+        "  --no-net           Skip network analysis\n"
+        "  --no-modules       Skip module analysis\n"
+        "  --no-hooks         Skip hook/rootkit detection\n"
+        "  --version          Print version and exit\n"
+        "  -h, --help         Show this help\n"
+        "\n"
+        "Environment variables:\n"
+        "  MEMSCOPE_VENV      Python virtualenv path (same as -v)\n"
+        "  VOLATILITY_SYMBOLS Volatility3 symbol table path (same as --symbols)\n"
         "\n"
         "Examples:\n"
         "  %s -i /mnt/images/win10.vmem --pretty\n"
         "  %s -i /mnt/images/linux.lime -o report.json --os linux\n"
-        "  %s -i dump.raw -v /opt/vol3-venv --pretty -o out.json\n",
-        prog, prog, prog, prog);
+        "  %s -i dump.raw --symbols /opt/vol3-symbols --pretty -o out.json\n"
+        "  %s -i linux.lime --os linux --symbols /opt/symbols/linux.json\n",
+        prog, prog, prog, prog, prog);
 }
+
+/* Long option indices */
+enum {
+    OPT_OS       = 0,
+    OPT_PRETTY   = 1,
+    OPT_NO_NET   = 2,
+    OPT_NO_MOD   = 3,
+    OPT_NO_HOOKS = 4,
+    OPT_VERSION  = 5,
+    OPT_SYMBOLS  = 6,
+};
 
 static int parse_args(int argc, char *argv[], CliOptions *opts)
 {
@@ -162,12 +184,13 @@ static int parse_args(int argc, char *argv[], CliOptions *opts)
     strncpy(opts->os_override, "auto", sizeof(opts->os_override) - 1);
 
     static struct option long_opts[] = {
-        {"os",          required_argument, 0, 0},
-        {"pretty",      no_argument,       0, 1},
-        {"no-net",      no_argument,       0, 2},
-        {"no-modules",  no_argument,       0, 3},
-        {"no-hooks",    no_argument,       0, 4},
-        {"version",     no_argument,       0, 5},
+        {"os",          required_argument, 0, OPT_OS},
+        {"pretty",      no_argument,       0, OPT_PRETTY},
+        {"no-net",      no_argument,       0, OPT_NO_NET},
+        {"no-modules",  no_argument,       0, OPT_NO_MOD},
+        {"no-hooks",    no_argument,       0, OPT_NO_HOOKS},
+        {"version",     no_argument,       0, OPT_VERSION},
+        {"symbols",     required_argument, 0, OPT_SYMBOLS},
         {"help",        no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -190,16 +213,20 @@ static int parse_args(int argc, char *argv[], CliOptions *opts)
         case 'h':
             print_usage(argv[0]);
             exit(0);
-        case 0:
+        case OPT_OS:
             strncpy(opts->os_override, optarg,
                     sizeof(opts->os_override) - 1);
             break;
-        case 1: opts->pretty       = true; break;
-        case 2: opts->skip_net     = true; break;
-        case 3: opts->skip_modules = true; break;
-        case 4: opts->skip_hooks   = true; break;
-        case 5:
-            printf("memscope version %s\n", MEMSCOPE_VERSION_STR);
+        case OPT_SYMBOLS:
+            strncpy(opts->symbols_path, optarg,
+                    sizeof(opts->symbols_path) - 1);
+            break;
+        case OPT_PRETTY:   opts->pretty       = true; break;
+        case OPT_NO_NET:   opts->skip_net     = true; break;
+        case OPT_NO_MOD:   opts->skip_modules = true; break;
+        case OPT_NO_HOOKS: opts->skip_hooks   = true; break;
+        case OPT_VERSION:
+            printf("RootKitChecker version %s\n", MEMSCOPE_VERSION_STR);
             exit(0);
         default:
             print_usage(argv[0]);
@@ -217,6 +244,21 @@ static int parse_args(int argc, char *argv[], CliOptions *opts)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Resolve symbols path: CLI > env var > NULL                          */
+/* ------------------------------------------------------------------ */
+static const char *resolve_symbols_path(const CliOptions *opts)
+{
+    if (strlen(opts->symbols_path) > 0)
+        return opts->symbols_path;
+
+    const char *env = getenv("VOLATILITY_SYMBOLS");
+    if (env && strlen(env) > 0)
+        return env;
+
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ */
 /*  main                                                                */
 /* ------------------------------------------------------------------ */
 int main(int argc, char *argv[])
@@ -225,16 +267,17 @@ int main(int argc, char *argv[])
     if (parse_args(argc, argv, &opts) != 0)
         return 1;
 
-    /* Determine venv path */
+    /* Determine venv path: CLI -v > env var MEMSCOPE_VENV */
     const char *venv = strlen(opts.venv_path) > 0
                        ? opts.venv_path : NULL;
-
-    /* Check for MEMSCOPE_VENV environment variable as fallback */
     if (!venv) {
         const char *env_venv = getenv("MEMSCOPE_VENV");
         if (env_venv && strlen(env_venv) > 0)
             venv = env_venv;
     }
+
+    /* Determine symbols path: CLI --symbols > env var VOLATILITY_SYMBOLS */
+    const char *symbols = resolve_symbols_path(&opts);
 
     fprintf(stderr, "[memscope] Initializing (venv: %s)...\n",
             venv ? venv : "system Python");
@@ -244,12 +287,18 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    /* Configure symbol table path in pybridge before scanning */
+    if (symbols) {
+        fprintf(stderr, "[memscope] Symbol table path: %s\n", symbols);
+        pybridge_set_symbols_path(symbols);
+    }
+
     fprintf(stderr, "[memscope] Scanning image: %s\n", opts.image_path);
 
     ScanResult result;
+    int rc = 0;
 
     /* OS override */
-    int rc = 0;
     if (strcmp(opts.os_override, "windows") == 0) {
         memset(&result, 0, sizeof(result));
         time_t now = time(NULL);

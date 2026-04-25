@@ -139,6 +139,16 @@ export MEMSCOPE_VENV=$(pwd)/.venv
 ./build/memscope -i /path/to/image.vmem --os windows
 ./build/memscope -i /path/to/image.lime --os linux
 
+# 指定符号表路径（目录）
+./build/memscope -i /path/to/image.vmem --symbols /opt/vol3-symbols/ --pretty
+
+# 指定符号表路径（单个 ISF 文件）
+./build/memscope -i /path/to/linux.lime --os linux --symbols /opt/symbols/linux-5.15.json
+
+# 通过环境变量指定符号表路径
+export VOLATILITY_SYMBOLS=/opt/vol3-symbols/
+./build/memscope -i /path/to/image.vmem --pretty
+
 # 格式化 JSON 输出
 ./build/memscope -i /path/to/image.vmem --pretty
 
@@ -153,6 +163,7 @@ export MEMSCOPE_VENV=$(pwd)/.venv
 | `-i <path>` | 内存镜像路径（必填） |
 | `--os <windows\|linux>` | 指定操作系统类型（可选，默认自动检测） |
 | `-o <file>` | 输出 JSON 文件路径（可选，默认 stdout） |
+| `--symbols <path>` | Volatility3 符号表目录或单个 ISF 文件路径（也可通过 `VOLATILITY_SYMBOLS` 环境变量设置） |
 | `--pretty` | 格式化 JSON 输出（缩进 2 空格） |
 | `--venv <path>` | Python 虚拟环境路径（也可通过 `MEMSCOPE_VENV` 环境变量设置） |
 | `--no-net` | 跳过网络连接分析 |
@@ -265,24 +276,61 @@ export MEMSCOPE_VENV=$(pwd)/.venv
 
 ## 符号表配置
 
-### Windows（自动下载）
+Volatility3 需要符号表（ISF 格式）才能正确解析内存结构。RootKitChecker 支持通过 `--symbols` 参数或 `VOLATILITY_SYMBOLS` 环境变量指定符号表路径，两种方式等效，命令行参数优先级更高。
 
-volatility3 会自动从 Microsoft Symbol Server 下载符号表。如需离线使用：
+### 指定方式
 
 ```bash
-export VOLATILITY_SYMBOLS=/path/to/symbols
+# 方式一：命令行参数（推荐）
+./build/memscope -i image.vmem --symbols /opt/vol3-symbols/
+
+# 方式二：环境变量
+export VOLATILITY_SYMBOLS=/opt/vol3-symbols/
+./build/memscope -i image.vmem
+
+# 支持目录（含多个符号文件）
+./build/memscope -i win10.vmem --symbols /opt/symbols/windows/
+
+# 支持单个 ISF 文件
+./build/memscope -i linux.lime --os linux --symbols /opt/symbols/linux-5.15.0-91-generic.json
 ```
 
-### Linux（手动生成）
+### Windows 符号表
+
+Windows 镜像分析时，volatility3 默认会自动从 Microsoft Symbol Server 下载 PDB 符号文件并转换为 ISF 格式，**无需手动操作**。如需离线环境或加速分析，可预先下载后通过 `--symbols` 指定：
 
 ```bash
-# 在目标系统上生成 ISF 符号文件
+# 离线使用：将已下载的符号目录传入
+./build/memscope -i win10.vmem --symbols /opt/windows-symbols/ --pretty
+```
+
+### Linux 符号表
+
+Linux 内核符号表需要手动生成，使用 [dwarf2json](https://github.com/volatilityfoundation/dwarf2json) 工具从带调试信息的内核文件生成 ISF 文件：
+
+```bash
+# 步骤一：安装 dwarf2json
 pip install dwarf2json
-dwarf2json linux --elf /usr/lib/debug/boot/vmlinux-$(uname -r) > linux.json
 
-# 放置到 volatility3 符号目录
-cp linux.json ~/.local/lib/python3.x/site-packages/volatility3/symbols/linux/
+# 步骤二：生成符号文件（在目标系统或版本完全一致的系统上执行）
+dwarf2json linux --elf /usr/lib/debug/boot/vmlinux-$(uname -r) > linux-$(uname -r).json
+
+# 步骤三：分析时通过 --symbols 指定
+./build/memscope -i linux.lime --os linux --symbols ./linux-$(uname -r).json --pretty
+
+# 或者将符号文件放入统一目录，批量管理
+mkdir -p /opt/vol3-symbols/linux/
+cp linux-*.json /opt/vol3-symbols/linux/
+./build/memscope -i linux.lime --os linux --symbols /opt/vol3-symbols/
 ```
+
+### 符号路径优先级
+
+| 优先级 | 来源 | 示例 |
+|---|---|---|
+| 1（最高） | `--symbols` 命令行参数 | `--symbols /opt/symbols/` |
+| 2 | `VOLATILITY_SYMBOLS` 环境变量 | `export VOLATILITY_SYMBOLS=/opt/symbols/` |
+| 3（最低） | volatility3 内置路径 | 自动搜索 site-packages 内的 symbols/ 目录 |
 
 ---
 

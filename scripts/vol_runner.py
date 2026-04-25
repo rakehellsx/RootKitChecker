@@ -335,6 +335,39 @@ def list_plugins():
     }
 
 
+def apply_symbols_path(symbols_path: str) -> None:
+    """
+    Configure Volatility3 to search for symbol tables in the given path.
+
+    Volatility3 uses `volatility3.framework.constants.SYMBOL_BASEPATHS`
+    (a list) to locate ISF JSON files.  We prepend the user-supplied path
+    so it takes precedence over the built-in locations.
+
+    Accepted formats:
+      - A directory containing .json / .json.xz ISF files, e.g.:
+            /opt/volatility3-symbols/
+        Volatility3 will search recursively inside this directory.
+      - A path to a single ISF file, e.g.:
+            /opt/symbols/linux-5.15.0-91-generic.json
+        In this case the parent directory is added to SYMBOL_BASEPATHS.
+    """
+    if not symbols_path:
+        return
+
+    import os
+    import volatility3.framework.constants as constants
+
+    if os.path.isfile(symbols_path):
+        # Single ISF file: add its parent directory
+        sym_dir = os.path.dirname(os.path.abspath(symbols_path))
+    else:
+        sym_dir = os.path.abspath(symbols_path)
+
+    # Prepend so user path takes priority
+    if sym_dir not in constants.SYMBOL_BASEPATHS:
+        constants.SYMBOL_BASEPATHS.insert(0, sym_dir)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="RootKitChecker / Volatility3 JSON runner")
@@ -348,7 +381,15 @@ def main():
                         help="Detect OS type only")
     parser.add_argument("--list-plugins", action="store_true",
                         help="List all available plugins")
+    parser.add_argument("--symbols",      default=None,
+                        help="Volatility3 symbol table directory or ISF file path "
+                             "(overrides VOLATILITY_SYMBOLS env var)")
     args = parser.parse_args()
+
+    # Resolve symbol table path: CLI --symbols > env var VOLATILITY_SYMBOLS
+    symbols_path = args.symbols or os.environ.get("VOLATILITY_SYMBOLS", "")
+    if symbols_path:
+        apply_symbols_path(symbols_path)
 
     try:
         if args.list_plugins:

@@ -79,6 +79,17 @@ void pybridge_free_result(PluginResult *res);
 void pybridge_set_symbols_path(const char *symbols_path);
 
 /**
+ * Set the directory where extracted kernel module files will be written.
+ *
+ * This path is forwarded to vol_runner.py via the --dump-dir argument and
+ * also exported as the MEMSCOPE_DUMP_DIR environment variable.
+ *
+ * @param dump_dir  Path to an existing (or creatable) directory.
+ *                  Pass NULL to reset to default ("./module_dumps").
+ */
+void pybridge_set_dump_dir(const char *dump_dir);
+
+/**
  * Detect the OS of a memory image by probing windows.info / linux.pslist.
  * Returns "windows", "linux", "macos", or "unknown".
  */

@@ -40,6 +40,7 @@
 static char g_python_exe[1024]     = "python3";
 static char g_runner_script[2048]  = "";
 static char g_symbols_path[4096]   = "";   /* empty = not set */
+static char g_dump_dir[4096]       = "";   /* empty = not set */
 static bool g_initialized          = false;
 
 /* ------------------------------------------------------------------ */
@@ -122,11 +123,14 @@ static const char **build_argv(const char *const base_argv[],
     }
 
     /* Symbols slot: "--symbols" + path = 2 extra slots (if set) */
-    int sym_slots = (g_symbols_path[0] != '\0') ? 2 : 0;
+    int sym_slots  = (g_symbols_path[0] != '\0') ? 2 : 0;
+    /* Dump-dir slot: "--dump-dir" + path = 2 extra slots (if set) */
+    int dump_slots = (g_dump_dir[0] != '\0') ? 2 : 0;
 
-    /* Total: base + sym_slots + ("--args" + extras if any) + NULL */
+    /* Total: base + sym_slots + dump_slots + ("--args" + extras if any) + NULL */
     int total = base_count
               + sym_slots
+              + dump_slots
               + (extra_count > 0 ? 1 + extra_count : 0)
               + 1;
 
@@ -143,6 +147,12 @@ static const char **build_argv(const char *const base_argv[],
     if (g_symbols_path[0] != '\0') {
         argv[idx++] = "--symbols";
         argv[idx++] = g_symbols_path;
+    }
+
+    /* Append --dump-dir <path> if configured */
+    if (g_dump_dir[0] != '\0') {
+        argv[idx++] = "--dump-dir";
+        argv[idx++] = g_dump_dir;
     }
 
     /* Append --args key=val ... if present */
@@ -222,6 +232,24 @@ void pybridge_set_symbols_path(const char *symbols_path)
     /* Also export as environment variable so that Volatility3's automagic
      * layer picks it up even before vol_runner.py processes --symbols.   */
     setenv("VOLATILITY_SYMBOLS", g_symbols_path, 1 /* overwrite */);
+}
+
+/* ------------------------------------------------------------------ */
+/*  pybridge_set_dump_dir                                               */
+/* ------------------------------------------------------------------ */
+void pybridge_set_dump_dir(const char *dump_dir)
+{
+    if (!dump_dir || *dump_dir == '\0') {
+        g_dump_dir[0] = '\0';
+        unsetenv("MEMSCOPE_DUMP_DIR");
+        return;
+    }
+
+    strncpy(g_dump_dir, dump_dir, sizeof(g_dump_dir) - 1);
+    g_dump_dir[sizeof(g_dump_dir) - 1] = '\0';
+
+    /* Also export as environment variable */
+    setenv("MEMSCOPE_DUMP_DIR", g_dump_dir, 1 /* overwrite */);
 }
 
 /* ------------------------------------------------------------------ */

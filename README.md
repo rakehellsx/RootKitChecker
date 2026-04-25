@@ -154,6 +154,13 @@ export MEMSCOPE_VENV=$(pwd)/.venv
 export VOLATILITY_SYMBOLS=/opt/vol3-symbols/
 ./build/memscope -i /path/to/image.vmem --pretty
 
+# 指定内核驱动模块导出目录（Windows 镜像）
+./build/memscope -i /path/to/win10.vmem --dump-dir /tmp/drivers --pretty
+
+# 通过环境变量指定模块导出目录
+export MEMSCOPE_DUMP_DIR=/opt/driver-dumps/
+./build/memscope -i /path/to/win10.vmem --pretty
+
 # 格式化 JSON 输出
 ./build/memscope -i /path/to/image.vmem --pretty
 
@@ -169,8 +176,9 @@ export VOLATILITY_SYMBOLS=/opt/vol3-symbols/
 | `--os <windows\|linux>` | 指定操作系统类型（可选，默认自动检测） |
 | `-o <file>` | 输出 JSON 文件路径（可选，默认 stdout） |
 | `--symbols <path>` | Volatility3 符号表目录或单个 ISF 文件路径（也可通过 `VOLATILITY_SYMBOLS` 环境变量设置） |
+| `--dump-dir <path>` | 内核驱动模块（`.sys`）导出目录（也可通过 `MEMSCOPE_DUMP_DIR` 环境变量设置，默认 `./module_dumps`） |
 | `--pretty` | 格式化 JSON 输出（缩进 2 空格） |
-| `--venv <path>` | Python 虚拟环境路径（也可通过 `MEMSCOPE_VENV` 环境变量设置） |
+| `-v <path>` | Python 虚拟环境路径（也可通过 `MEMSCOPE_VENV` 环境变量设置） |
 | `--no-net` | 跳过网络连接分析 |
 | `--no-modules` | 跳过内核模块分析 |
 | `--no-hooks` | 跳过 Rootkit 钩子检测 |
@@ -336,6 +344,38 @@ cp linux-*.json /opt/vol3-symbols/linux/
 | 1（最高） | `--symbols` 命令行参数 | `--symbols /opt/symbols/` |
 | 2 | `VOLATILITY_SYMBOLS` 环境变量 | `export VOLATILITY_SYMBOLS=/opt/symbols/` |
 | 3（最低） | volatility3 内置路径 | 自动搜索 site-packages 内的 symbols/ 目录 |
+
+---
+
+## 模块导出路径配置
+
+分析 Windows 内存镜像时，`windows.modules.Modules --dump` 插件会将内核驱动（`.sys` 文件）提取到本地磁盘，供后续静态分析使用（如 IDA Pro、Ghidra 逆向分析）。导出目录通过以下方式指定，优先级由高到低：
+
+### 指定方式
+
+```bash
+# 方式一：命令行参数 --dump-dir（最高优先级，推荐）
+./build/memscope -i win10.vmem --dump-dir /opt/driver-dumps/ --pretty
+
+# 方式二：环境变量 MEMSCOPE_DUMP_DIR
+export MEMSCOPE_DUMP_DIR=/opt/driver-dumps/
+./build/memscope -i win10.vmem --pretty
+
+# 方式三：默认路径（最低优先级）
+# 若两者均未设置，导出到当前工作目录下的 ./module_dumps/ 子目录
+./build/memscope -i win10.vmem --pretty
+# 驱动文件将写入 ./module_dumps/ntfs.sys.0xfffff80012345000.dmp 等
+```
+
+### 导出路径优先级
+
+| 优先级 | 来源 | 示例 |
+|---|---|---|
+| 1（最高） | `--dump-dir` 命令行参数 | `--dump-dir /opt/driver-dumps/` |
+| 2 | `MEMSCOPE_DUMP_DIR` 环境变量 | `export MEMSCOPE_DUMP_DIR=/opt/driver-dumps/` |
+| 3（最低） | 默认路径 | `./module_dumps/`（相对于当前工作目录） |
+
+> **注意**：目录不存在时工具会自动创建（等效于 `mkdir -p`）。导出结果记录在 JSON 输出的 `windows_kernel_data.module_dumps` 数组中，每条记录含 `dump_path`（本地文件路径）和 `dump_ok`（是否成功）字段。
 
 ---
 

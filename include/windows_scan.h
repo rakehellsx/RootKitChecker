@@ -208,9 +208,14 @@ int windows_collect_virtual_map(const char *image_path,
 /**
  * Collect all Windows kernel data into WinKernelData.
  * Calls all collection functions above.
+ *
+ * @param dump_dir  Directory to write extracted .sys files.
+ *                  Pass NULL to use the value of MEMSCOPE_DUMP_DIR env var,
+ *                  or "./module_dumps" as the final fallback.
  */
 int windows_collect_kernel_data(const char *image_path,
-                                 WinKernelData *kd);
+                                 WinKernelData *kd,
+                                 const char *dump_dir);
 
 /**
  * Run the full Windows scan and populate a ScanResult.

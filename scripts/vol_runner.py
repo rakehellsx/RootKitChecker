@@ -415,12 +415,26 @@ def main():
     parser.add_argument("--symbols",      default=None,
                         help="Volatility3 symbol table directory or ISF file path "
                              "(overrides VOLATILITY_SYMBOLS env var)")
+    parser.add_argument("--dump-dir",     default=None,
+                        help="Directory to write extracted kernel module files "
+                             "(overrides MEMSCOPE_DUMP_DIR env var, "
+                             "default: ./module_dumps)")
     args = parser.parse_args()
 
     # Resolve symbol table path: CLI --symbols > env var VOLATILITY_SYMBOLS
     symbols_path = args.symbols or os.environ.get("VOLATILITY_SYMBOLS", "")
     if symbols_path:
         apply_symbols_path(symbols_path)
+
+    # Resolve dump directory: CLI --dump-dir > env var MEMSCOPE_DUMP_DIR > default
+    dump_dir = (args.dump_dir
+                or os.environ.get("MEMSCOPE_DUMP_DIR", "")
+                or "./module_dumps")
+    # Ensure dump directory exists
+    if dump_dir:
+        os.makedirs(dump_dir, exist_ok=True)
+        # Expose for plugins that accept a dump path via config
+        os.environ["MEMSCOPE_DUMP_DIR"] = os.path.abspath(dump_dir)
 
     try:
         if args.list_plugins:

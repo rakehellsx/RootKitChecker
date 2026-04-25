@@ -4,6 +4,7 @@
  * Usage:
  *   memscope -i <image_path> [-o <output_file>] [-v <venv_path>]
  *            [--os windows|linux|auto] [--symbols <path>]
+ *            [--dump-dir <path>]
  *            [--pretty] [--no-net] [--no-modules] [--no-hooks]
  *
  * Options:
@@ -13,6 +14,9 @@
  *   --os <type>        Force OS type: windows, linux, auto (default: auto)
  *   --symbols <path>   Path to Volatility3 symbol table directory or ISF file
  *                      (overrides VOLATILITY_SYMBOLS env var)
+ *   --dump-dir <path>  Directory to write extracted kernel module (.sys) files
+ *                      (default: ./module_dumps/ next to the image file)
+ *                      Overrides MEMSCOPE_DUMP_DIR env var
  *   --pretty           Pretty-print JSON output
  *   --no-net           Skip network connection analysis
  *   --no-modules       Skip kernel module analysis
@@ -35,6 +39,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 /* ------------------------------------------------------------------ */
 /*  memscope_free_result                                                */
@@ -127,6 +133,7 @@ typedef struct {
     char   venv_path[2048];
     char   os_override[16];    /* "windows", "linux", "auto" */
     char   symbols_path[4096]; /* Volatility3 symbol table path */
+    char   dump_dir[4096];     /* Directory for module dump output */
     bool   pretty;
     bool   skip_net;
     bool   skip_modules;
@@ -148,6 +155,9 @@ static void print_usage(const char *prog)
         "                     (overrides VOLATILITY_SYMBOLS env var)\n"
         "                     For Windows: directory containing .json.xz PDB files\n"
         "                     For Linux:   directory containing kernel ISF .json files\n"
+        "  --dump-dir <path>  Directory to write extracted kernel module (.sys) files\n"
+        "                     (overrides MEMSCOPE_DUMP_DIR env var)\n"
+        "                     Default: ./module_dumps/ relative to current directory\n"
         "  --pretty           Pretty-print JSON\n"
         "  --no-net           Skip network analysis\n"
         "  --no-modules       Skip module analysis\n"
@@ -156,15 +166,17 @@ static void print_usage(const char *prog)
         "  -h, --help         Show this help\n"
         "\n"
         "Environment variables:\n"
-        "  MEMSCOPE_VENV      Python virtualenv path (same as -v)\n"
-        "  VOLATILITY_SYMBOLS Volatility3 symbol table path (same as --symbols)\n"
+        "  MEMSCOPE_VENV        Python virtualenv path (same as -v)\n"
+        "  VOLATILITY_SYMBOLS   Volatility3 symbol table path (same as --symbols)\n"
+        "  MEMSCOPE_DUMP_DIR    Module dump output directory (same as --dump-dir)\n"
         "\n"
         "Examples:\n"
         "  %s -i /mnt/images/win10.vmem --pretty\n"
         "  %s -i /mnt/images/linux.lime -o report.json --os linux\n"
         "  %s -i dump.raw --symbols /opt/vol3-symbols --pretty -o out.json\n"
+        "  %s -i win10.vmem --dump-dir /tmp/drivers --pretty -o out.json\n"
         "  %s -i linux.lime --os linux --symbols /opt/symbols/linux.json\n",
-        prog, prog, prog, prog, prog);
+        prog, prog, prog, prog, prog, prog);
 }
 
 /* Long option indices */
@@ -176,6 +188,7 @@ enum {
     OPT_NO_HOOKS = 4,
     OPT_VERSION  = 5,
     OPT_SYMBOLS  = 6,
+    OPT_DUMP_DIR = 7,
 };
 
 static int parse_args(int argc, char *argv[], CliOptions *opts)
@@ -191,6 +204,7 @@ static int parse_args(int argc, char *argv[], CliOptions *opts)
         {"no-hooks",    no_argument,       0, OPT_NO_HOOKS},
         {"version",     no_argument,       0, OPT_VERSION},
         {"symbols",     required_argument, 0, OPT_SYMBOLS},
+        {"dump-dir",    required_argument, 0, OPT_DUMP_DIR},
         {"help",        no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -220,6 +234,10 @@ static int parse_args(int argc, char *argv[], CliOptions *opts)
         case OPT_SYMBOLS:
             strncpy(opts->symbols_path, optarg,
                     sizeof(opts->symbols_path) - 1);
+            break;
+        case OPT_DUMP_DIR:
+            strncpy(opts->dump_dir, optarg,
+                    sizeof(opts->dump_dir) - 1);
             break;
         case OPT_PRETTY:   opts->pretty       = true; break;
         case OPT_NO_NET:   opts->skip_net     = true; break;
@@ -259,6 +277,46 @@ static const char *resolve_symbols_path(const CliOptions *opts)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Resolve dump directory: CLI > env var > default "./module_dumps"   */
+/* ------------------------------------------------------------------ */
+static const char *resolve_dump_dir(const CliOptions *opts,
+                                     char *fallback_buf, size_t fallback_sz)
+{
+    /* Priority 1: --dump-dir CLI argument */
+    if (strlen(opts->dump_dir) > 0)
+        return opts->dump_dir;
+
+    /* Priority 2: MEMSCOPE_DUMP_DIR environment variable */
+    const char *env = getenv("MEMSCOPE_DUMP_DIR");
+    if (env && strlen(env) > 0)
+        return env;
+
+    /* Priority 3: default "./module_dumps" */
+    snprintf(fallback_buf, fallback_sz, "./module_dumps");
+    return fallback_buf;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ensure dump directory exists (mkdir -p equivalent)                  */
+/* ------------------------------------------------------------------ */
+static int ensure_dir(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) return 0;
+        fprintf(stderr, "[memscope] dump-dir '%s' exists but is not a directory\n",
+                path);
+        return -1;
+    }
+    if (mkdir(path, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "[memscope] Cannot create dump-dir '%s': %s\n",
+                path, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /*  main                                                                */
 /* ------------------------------------------------------------------ */
 int main(int argc, char *argv[])
@@ -279,6 +337,12 @@ int main(int argc, char *argv[])
     /* Determine symbols path: CLI --symbols > env var VOLATILITY_SYMBOLS */
     const char *symbols = resolve_symbols_path(&opts);
 
+    /* Determine dump directory: CLI --dump-dir > env var > default */
+    char dump_dir_fallback[4096];
+    const char *dump_dir = resolve_dump_dir(&opts,
+                                             dump_dir_fallback,
+                                             sizeof(dump_dir_fallback));
+
     fprintf(stderr, "[memscope] Initializing (venv: %s)...\n",
             venv ? venv : "system Python");
 
@@ -291,6 +355,16 @@ int main(int argc, char *argv[])
     if (symbols) {
         fprintf(stderr, "[memscope] Symbol table path: %s\n", symbols);
         pybridge_set_symbols_path(symbols);
+    }
+
+    /* Configure dump directory in pybridge */
+    fprintf(stderr, "[memscope] Module dump directory: %s\n", dump_dir);
+    pybridge_set_dump_dir(dump_dir);
+
+    /* Ensure dump directory exists before scanning */
+    if (ensure_dir(dump_dir) != 0) {
+        fprintf(stderr, "[memscope] Warning: dump directory unavailable, "
+                        "module dumps will be skipped.\n");
     }
 
     fprintf(stderr, "[memscope] Scanning image: %s\n", opts.image_path);

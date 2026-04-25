@@ -794,8 +794,9 @@ int windows_full_scan(const char *image_path, ScanResult *result)
     }
 
     /* 10. Kernel data collection (os_info, modules, bigpools,
-     *     memmap, statistics, virtmap) */
-    windows_collect_kernel_data(image_path, &result->win_kernel);
+     *     memmap, statistics, virtmap, driver_irps, callbacks, timers) */
+    /* dump_dir=NULL: resolved inside via MEMSCOPE_DUMP_DIR env var or default */
+    windows_collect_kernel_data(image_path, &result->win_kernel, NULL);
 
     return 0;
 }
@@ -1326,13 +1327,24 @@ int windows_collect_timers(const char *image_path, WinKernelData *kd)
 /* ------------------------------------------------------------------ */
 /*  windows_collect_kernel_data  (aggregates all 11 above)             */
 /* ------------------------------------------------------------------ */
-int windows_collect_kernel_data(const char *image_path, WinKernelData *kd)
+int windows_collect_kernel_data(const char *image_path,
+                                 WinKernelData *kd,
+                                 const char *dump_dir)
 {
     memset(kd, 0, sizeof(*kd));
 
+    /* Resolve dump directory: parameter > env var > default */
+    const char *resolved_dump_dir = dump_dir;
+    if (!resolved_dump_dir || *resolved_dump_dir == '\0') {
+        resolved_dump_dir = getenv("MEMSCOPE_DUMP_DIR");
+    }
+    if (!resolved_dump_dir || *resolved_dump_dir == '\0') {
+        resolved_dump_dir = "./module_dumps";
+    }
+
     windows_collect_os_info(image_path, kd);
     windows_collect_loaded_modules(image_path, kd);
-    windows_collect_module_dumps(image_path, kd, NULL);  /* NULL = default dir */
+    windows_collect_module_dumps(image_path, kd, resolved_dump_dir);
     windows_collect_driver_irps(image_path, kd);
     windows_collect_unloaded_modules(image_path, kd);
     windows_collect_callbacks(image_path, kd);

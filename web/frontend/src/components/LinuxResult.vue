@@ -45,6 +45,10 @@
               :count="(data.tty_hooks||[]).length"
               :items="(data.tty_hooks||[]).map((h:any)=>h.module||h.symbol||'?')"
               empty-text="未发现 TTY 钩子" />
+            <DetectCard title="键盘钩子" severity="critical" icon="keyboard"
+              :count="(data.keyboard_notifiers||[]).length"
+              :items="(data.keyboard_notifiers||[]).map((h:any)=>h.module||h.symbol||'?')"
+              empty-text="未发现键盘钩子（键盘记录器）" />
           </div>
         </div>
       </el-tab-pane>
@@ -354,7 +358,19 @@
             <span class="toolbar-hint">共 {{ filteredProcs.length }} 条</span>
           </div>
           <el-table :data="filteredProcs" stripe size="small" class="data-table" border :header-cell-style="headerStyle">
-            <el-table-column prop="pid"        label="PID"   width="72" sortable />
+            <el-table-column type="expand" width="30">
+              <template #default="{ row }">
+                <div class="expand-detail">
+                  <div class="detail-row"><span class="detail-label">可执行路径</span><span class="detail-value mono-addr">{{ row.exe || '(未知)' }}</span></div>
+                  <div class="detail-row"><span class="detail-label">命令行</span><span class="detail-value cmdline-val">{{ row.cmdline || '(未知)' }}</span></div>
+                  <div class="detail-row"><span class="detail-label">task_struct 偏移</span><span class="detail-value mono-addr">{{ row.task_offset || '(未知)' }}</span></div>
+                  <div class="detail-row"><span class="detail-label">EUID / EGID</span><span class="detail-value"><span :class="row.euid===0?'uid-root':''" >{{ row.euid ?? '-' }}</span><span class="muted-val"> / {{ row.egid ?? '-' }}</span></span></div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pid"        label="PID"   width="72" sortable>
+              <template #default="{ row }"><span class="pid-badge">{{ row.pid }}</span></template>
+            </el-table-column>
             <el-table-column prop="ppid"       label="PPID"  width="72" sortable />
             <el-table-column prop="name"       label="进程名" min-width="160" show-overflow-tooltip />
             <el-table-column prop="uid"        label="UID"   width="65">
@@ -365,7 +381,7 @@
             <el-table-column prop="gid"        label="GID"   width="65" />
             <el-table-column prop="state"      label="状态"  width="65" align="center">
               <template #default="{ row }">
-                <span class="proc-state-badge">{{ row.state || '-' }}</span>
+                <span class="proc-state-badge" :class="procStateClass(row.state)">{{ row.state || '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="start_time" label="启动时间" width="155" show-overflow-tooltip />
@@ -389,7 +405,18 @@
             <span class="toolbar-hint">共 {{ filteredNet.length }} 条</span>
           </div>
           <el-table :data="filteredNet" stripe size="small" class="data-table" border :header-cell-style="headerStyle">
-            <el-table-column prop="pid"     label="PID"  width="70" />
+            <el-table-column type="expand" width="30">
+              <template #default="{ row }">
+                <div class="expand-detail">
+                  <div class="detail-row"><span class="detail-label">Inode</span><span class="detail-value mono-addr">{{ row.inode ?? '(未知)' }}</span></div>
+                  <div class="detail-row"><span class="detail-label">网络命名空间</span><span class="detail-value mono-addr">{{ row.net_ns || '(未知)' }}</span></div>
+                  <div class="detail-row"><span class="detail-label">UID</span><span class="detail-value"><span :class="row.uid===0?'uid-root':''" >{{ row.uid ?? '-' }}</span></span></div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pid"     label="PID"  width="70">
+              <template #default="{ row }"><span class="pid-badge">{{ row.pid ?? '-' }}</span></template>
+            </el-table-column>
             <el-table-column prop="process" label="进程" width="130" show-overflow-tooltip />
             <el-table-column prop="proto"   label="协议" width="80" align="center">
               <template #default="{ row }"><span class="proto-tag">{{ row.proto || '-' }}</span></template>
@@ -403,9 +430,9 @@
             </el-table-column>
             <el-table-column label="远端" min-width="170">
               <template #default="{ row }">
-                <span class="mono-addr">{{ row.remote_addr || '-' }}</span>
+                <span class="mono-addr">{{ row.remote_addr || row.foreign_addr || '-' }}</span>
                 <span class="port-sep">:</span>
-                <span class="port-num">{{ row.remote_port ?? '-' }}</span>
+                <span class="port-num">{{ row.remote_port ?? row.foreign_port ?? '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="state" label="状态" width="130" align="center">

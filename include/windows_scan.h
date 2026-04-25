@@ -8,12 +8,17 @@
  *  - Hidden network connections (NetScan vs NetStat)
  *  - Hidden kernel modules (Modules vs ModScan vs DriverScan)
  *  - Kernel data collection:
- *      os_info       windows.info.Info
- *      loaded_modules windows.modules.Modules
- *      big_pools     windows.bigpools.BigPools
- *      memory_map    windows.memmap.Memmap
- *      statistics    windows.statistics.Statistics
- *      virtual_map   windows.virtmap.VirtMap
+ *      os_info           windows.info.Info
+ *      loaded_modules    windows.modules.Modules
+ *      module_dumps      windows.modules.Modules --dump
+ *      driver_irps       windows.driverirp.DriverIrp
+ *      unloaded_modules  windows.unloadedmodules.UnloadedModules
+ *      callbacks         windows.callbacks.Callbacks
+ *      timers            windows.timers.Timers
+ *      big_pools         windows.bigpools.BigPools
+ *      memory_map        windows.memmap.Memmap
+ *      statistics        windows.statistics.Statistics
+ *      virtual_map       windows.virtmap.VirtMap
  */
 
 #ifndef WINDOWS_SCAN_H
@@ -108,11 +113,64 @@ int windows_collect_os_info(const char *image_path,
 
 /**
  * windows.modules.Modules
- * Full loaded driver/module list with base, size, path.
+ * Full loaded driver/module list (PsLoadedModuleList walk):
+ * ntoskrnl.exe, drivers, HAL, etc.
  * Results stored in WinKernelData.loaded_modules[].
  */
 int windows_collect_loaded_modules(const char *image_path,
                                     WinKernelData *kd);
+
+/**
+ * windows.modules.Modules --dump
+ * Extract kernel driver .sys files to disk for static analysis.
+ * Results stored in WinKernelData.module_dumps[].
+ * Dumped files are written to <dump_dir>/ (default: ./module_dumps/).
+ */
+int windows_collect_module_dumps(const char *image_path,
+                                  WinKernelData *kd,
+                                  const char *dump_dir);
+
+/**
+ * windows.driverirp.DriverIrp
+ * Parse DRIVER_OBJECT->MajorFunction array for each driver.
+ * Detects IRP hooks where a handler points outside the driver's own range.
+ * Results stored in WinKernelData.driver_irps[].
+ */
+int windows_collect_driver_irps(const char *image_path,
+                                  WinKernelData *kd);
+
+/**
+ * windows.unloadedmodules.UnloadedModules
+ * Extract PsUnloadedDriversList to discover drivers that were loaded
+ * and subsequently unloaded (common pattern for dropper/loader rootkits).
+ * Results stored in WinKernelData.unloaded_modules[].
+ */
+int windows_collect_unloaded_modules(const char *image_path,
+                                      WinKernelData *kd);
+
+/**
+ * windows.callbacks.Callbacks
+ * Enumerate kernel notification callbacks:
+ *   PsSetCreateProcessNotifyRoutine   (CreateProcessNotifyRoutine)
+ *   PsSetCreateThreadNotifyRoutine    (CreateThreadNotifyRoutine)
+ *   PsSetLoadImageNotifyRoutine       (LoadImageNotifyRoutine)
+ *   CmRegisterCallback                (RegistryCallback)
+ *   IoRegisterFsRegistrationChange    (FsChangeNotify)
+ *   DbgkRegisterPluginCallbacks       (DbgkPluginCallbacks)
+ * Results stored in WinKernelData.callbacks[].
+ */
+int windows_collect_callbacks(const char *image_path,
+                               WinKernelData *kd);
+
+/**
+ * windows.timers.Timers
+ * Parse KTIMER objects from the kernel timer list.
+ * Rootkits often install periodic DPC timers to re-hook or maintain
+ * persistence after detection/removal.
+ * Results stored in WinKernelData.timers[].
+ */
+int windows_collect_timers(const char *image_path,
+                            WinKernelData *kd);
 
 /**
  * windows.bigpools.BigPools
@@ -149,7 +207,7 @@ int windows_collect_virtual_map(const char *image_path,
 
 /**
  * Collect all Windows kernel data into WinKernelData.
- * Calls all six collection functions above.
+ * Calls all collection functions above.
  */
 int windows_collect_kernel_data(const char *image_path,
                                  WinKernelData *kd);

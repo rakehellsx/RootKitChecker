@@ -239,6 +239,81 @@ static cJSON *mount_to_json(const MountRecord *m)
     } while (0)
 
 /* ------------------------------------------------------------------ */
+/*  IrpRecord                                                           */
+/* ------------------------------------------------------------------ */
+static cJSON *irp_to_json(const IrpRecord *irp)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_str(obj, "driver_name",     irp->driver_name);
+    json_add_str(obj, "driver_path",     irp->driver_path);
+    cJSON_AddNumberToObject(obj, "irp_index", (double)irp->irp_index);
+    json_add_str(obj, "irp_name",        irp->irp_name);
+    json_add_u64(obj, "handler_addr",    irp->handler_addr);
+    json_add_str(obj, "handler_module",  irp->handler_module);
+    cJSON_AddBoolToObject(obj, "hooked", irp->hooked);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  UnloadedModuleRecord                                                */
+/* ------------------------------------------------------------------ */
+static cJSON *unloaded_module_to_json(const UnloadedModuleRecord *m)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_str(obj, "name",        m->name);
+    json_add_u64(obj, "start_addr",  m->start_addr);
+    json_add_u64(obj, "end_addr",    m->end_addr);
+    json_add_str(obj, "unload_time", m->unload_time);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  CallbackRecord                                                      */
+/* ------------------------------------------------------------------ */
+static cJSON *callback_to_json(const CallbackRecord *cb)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_str(obj, "callback_type",  cb->callback_type);
+    json_add_u64(obj, "callback_addr",  cb->callback_addr);
+    json_add_str(obj, "module",         cb->module);
+    json_add_str(obj, "symbol",         cb->symbol);
+    if (cb->detail[0] != '\0' && strcmp(cb->detail, "N/A") != 0)
+        json_add_str(obj, "detail", cb->detail);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  TimerRecord                                                         */
+/* ------------------------------------------------------------------ */
+static cJSON *timer_to_json(const TimerRecord *t)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_u64(obj, "offset",          t->offset);
+    json_add_u64(obj, "due_time",         t->due_time);
+    cJSON_AddNumberToObject(obj, "period",   (double)t->period);
+    cJSON_AddNumberToObject(obj, "signaled", (double)t->signaled);
+    json_add_u64(obj, "routine_addr",     t->routine_addr);
+    json_add_str(obj, "routine_module",   t->routine_module);
+    json_add_str(obj, "routine_symbol",   t->routine_symbol);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
+/*  ModuleDumpRecord                                                    */
+/* ------------------------------------------------------------------ */
+static cJSON *module_dump_to_json(const ModuleDumpRecord *d)
+{
+    cJSON *obj = cJSON_CreateObject();
+    json_add_str(obj, "name",      d->name);
+    json_add_u64(obj, "base",      d->base);
+    cJSON_AddNumberToObject(obj, "size", (double)d->size);
+    json_add_str(obj, "path",      d->path);
+    json_add_str(obj, "dump_path", d->dump_path);
+    cJSON_AddBoolToObject(obj, "dump_ok", d->dump_ok);
+    return obj;
+}
+
+/* ------------------------------------------------------------------ */
 /*  WinKernelData serializer                                            */
 /* ------------------------------------------------------------------ */
 static cJSON *win_kernel_data_to_json(const WinKernelData *kd)
@@ -257,6 +332,57 @@ static cJSON *win_kernel_data_to_json(const WinKernelData *kd)
                       kd->loaded_modules, kd->loaded_module_count);
     else
         cJSON_AddArrayToObject(obj, "loaded_modules");
+
+    /* module_dumps: windows.modules.Modules --dump */
+    if (kd->module_dumps && kd->module_dump_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->module_dump_count; i++)
+            cJSON_AddItemToArray(arr, module_dump_to_json(&kd->module_dumps[i]));
+        cJSON_AddItemToObject(obj, "module_dumps", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "module_dumps");
+    }
+
+    /* driver_irps: windows.driverirp.DriverIrp */
+    if (kd->driver_irps && kd->driver_irp_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->driver_irp_count; i++)
+            cJSON_AddItemToArray(arr, irp_to_json(&kd->driver_irps[i]));
+        cJSON_AddItemToObject(obj, "driver_irps", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "driver_irps");
+    }
+
+    /* unloaded_modules: windows.unloadedmodules.UnloadedModules */
+    if (kd->unloaded_modules && kd->unloaded_module_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->unloaded_module_count; i++)
+            cJSON_AddItemToArray(arr,
+                unloaded_module_to_json(&kd->unloaded_modules[i]));
+        cJSON_AddItemToObject(obj, "unloaded_modules", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "unloaded_modules");
+    }
+
+    /* callbacks: windows.callbacks.Callbacks */
+    if (kd->callbacks && kd->callback_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->callback_count; i++)
+            cJSON_AddItemToArray(arr, callback_to_json(&kd->callbacks[i]));
+        cJSON_AddItemToObject(obj, "callbacks", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "callbacks");
+    }
+
+    /* timers: windows.timers.Timers */
+    if (kd->timers && kd->timer_count > 0) {
+        cJSON *arr = cJSON_CreateArray();
+        for (int i = 0; i < kd->timer_count; i++)
+            cJSON_AddItemToArray(arr, timer_to_json(&kd->timers[i]));
+        cJSON_AddItemToObject(obj, "timers", arr);
+    } else {
+        cJSON_AddArrayToObject(obj, "timers");
+    }
 
     /* big_pools: windows.bigpools.BigPools */
     if (kd->big_pools && kd->big_pool_count > 0) {

@@ -163,32 +163,111 @@ typedef struct {
 } KernelInfo;
 
 /* ------------------------------------------------------------------ */
+/*  Driver IRP dispatch routine record (windows.driverirp.DriverIrp)   */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    char        driver_name[256];   /* e.g. \Driver\Null                */
+    char        driver_path[512];   /* full image path of the driver    */
+    uint32_t    irp_index;          /* MajorFunction index (0-27)       */
+    char        irp_name[64];       /* IRP_MJ_CREATE, IRP_MJ_READ …    */
+    uint64_t    handler_addr;       /* virtual address of the handler   */
+    char        handler_module[256];/* module owning the handler        */
+    bool        hooked;             /* handler outside driver's range   */
+} IrpRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Unloaded module record (windows.unloadedmodules.UnloadedModules)   */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    char        name[256];          /* driver base name                 */
+    uint64_t    start_addr;         /* load base address                */
+    uint64_t    end_addr;           /* load end address                 */
+    char        unload_time[64];    /* timestamp when driver unloaded   */
+} UnloadedModuleRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Kernel callback record (windows.callbacks.Callbacks)               */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    char        callback_type[128]; /* CreateProcess / LoadImage / …   */
+    uint64_t    callback_addr;      /* address of the callback routine  */
+    char        module[256];        /* module owning the callback       */
+    char        symbol[256];        /* resolved symbol name if any      */
+    char        detail[512];        /* extra info (registry path, …)   */
+} CallbackRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Kernel timer record (windows.timers.Timers)                        */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    uint64_t    offset;             /* KTIMER object address            */
+    uint64_t    due_time;           /* absolute due time (100ns units)  */
+    uint64_t    period;             /* period in ms (0 = one-shot)      */
+    uint64_t    signaled;           /* 1 if timer is in signaled state  */
+    uint64_t    routine_addr;       /* DPC routine address              */
+    char        routine_module[256];/* module owning the DPC routine    */
+    char        routine_symbol[256];/* resolved symbol name if any      */
+} TimerRecord;
+
+/* ------------------------------------------------------------------ */
+/*  Module dump record (windows.modules.Modules --dump)                */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    char        name[256];          /* driver base name                 */
+    uint64_t    base;               /* load base address                */
+    uint64_t    size;               /* image size in bytes              */
+    char        path[512];          /* original path in image           */
+    char        dump_path[512];     /* local path where file was dumped */
+    bool        dump_ok;            /* true if dump succeeded           */
+} ModuleDumpRecord;
+
+/* ------------------------------------------------------------------ */
 /*  Windows kernel data collection                                      */
 /* ------------------------------------------------------------------ */
 typedef struct {
     /* windows.info.Info */
-    KVRecord       *os_info;
-    int             os_info_count;
+    KVRecord           *os_info;
+    int                 os_info_count;
 
     /* windows.modules.Modules — full loaded driver list */
-    ModuleRecord   *loaded_modules;
-    int             loaded_module_count;
+    ModuleRecord       *loaded_modules;
+    int                 loaded_module_count;
+
+    /* windows.modules.Modules --dump — extracted driver binaries */
+    ModuleDumpRecord   *module_dumps;
+    int                 module_dump_count;
+
+    /* windows.driverirp.DriverIrp — IRP dispatch routine table */
+    IrpRecord          *driver_irps;
+    int                 driver_irp_count;
+
+    /* windows.unloadedmodules.UnloadedModules — previously unloaded drivers */
+    UnloadedModuleRecord *unloaded_modules;
+    int                   unloaded_module_count;
+
+    /* windows.callbacks.Callbacks — kernel notification callbacks */
+    CallbackRecord     *callbacks;
+    int                 callback_count;
+
+    /* windows.timers.Timers — KTIMER objects */
+    TimerRecord        *timers;
+    int                 timer_count;
 
     /* windows.bigpools.BigPools — large kernel pool allocations */
-    BigPoolRecord  *big_pools;
-    int             big_pool_count;
+    BigPoolRecord      *big_pools;
+    int                 big_pool_count;
 
     /* windows.memmap.Memmap — kernel virtual address map */
-    MemRegionRecord *memory_map;
-    int              memory_map_count;
+    MemRegionRecord    *memory_map;
+    int                 memory_map_count;
 
     /* windows.statistics.Statistics — memory statistics */
-    KVRecord       *statistics;
-    int             statistics_count;
+    KVRecord           *statistics;
+    int                 statistics_count;
 
     /* windows.virtmap.VirtMap — virtual memory region layout */
-    MemRegionRecord *virtual_map;
-    int              virtual_map_count;
+    MemRegionRecord    *virtual_map;
+    int                 virtual_map_count;
 } WinKernelData;
 
 /* ------------------------------------------------------------------ */

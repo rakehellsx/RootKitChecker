@@ -1044,7 +1044,287 @@ int windows_collect_virtual_map(const char *image_path, WinKernelData *kd)
 }
 
 /* ------------------------------------------------------------------ */
-/*  windows_collect_kernel_data  (aggregates all 6 above)              */
+/*  windows_collect_module_dumps  (windows.modules.Modules --dump)     */
+/* ------------------------------------------------------------------ */
+int windows_collect_module_dumps(const char *image_path,
+                                  WinKernelData *kd,
+                                  const char *dump_dir)
+{
+    kd->module_dumps      = NULL;
+    kd->module_dump_count = 0;
+
+    /* Build extra args: dump=True and optional dump_dir */
+    char dir_arg[4200] = "";
+    const char *args[4] = {NULL, NULL, NULL, NULL};
+    int ai = 0;
+    args[ai++] = "dump=True";
+    if (dump_dir && *dump_dir) {
+        snprintf(dir_arg, sizeof(dir_arg), "dump_dir=%s", dump_dir);
+        args[ai++] = dir_arg;
+    }
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.modules.Modules", args);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.modules --dump] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    ModuleDumpRecord *dumps = calloc(res->row_count + 1,
+                                     sizeof(ModuleDumpRecord));
+    if (!dumps) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        ModuleDumpRecord *d = &dumps[r];
+        safe_copy(d->name, sizeof(d->name),
+                  row_get(res, &res->rows[r], "Name"));
+        d->base = parse_u64(row_get(res, &res->rows[r], "Base"));
+        d->size = parse_u64(row_get(res, &res->rows[r], "Size"));
+        safe_copy(d->path, sizeof(d->path),
+                  row_get(res, &res->rows[r], "Path"));
+        /* Dump path returned by volatility3 in the "Dump" or "File output" column */
+        const char *dp = row_get(res, &res->rows[r], "Dump");
+        if (!dp || strcmp(dp, "N/A") == 0)
+            dp = row_get(res, &res->rows[r], "File output");
+        safe_copy(d->dump_path, sizeof(d->dump_path), dp);
+        d->dump_ok = (d->dump_path[0] != '\0' &&
+                      strcmp(d->dump_path, "N/A") != 0);
+    }
+
+    kd->module_dumps      = dumps;
+    kd->module_dump_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_driver_irps  (windows.driverirp.DriverIrp)         */
+/* ------------------------------------------------------------------ */
+
+/* IRP major function index -> name mapping */
+static const char *irp_name_table[] = {
+    "IRP_MJ_CREATE",                 /* 0x00 */
+    "IRP_MJ_CREATE_NAMED_PIPE",      /* 0x01 */
+    "IRP_MJ_CLOSE",                  /* 0x02 */
+    "IRP_MJ_READ",                   /* 0x03 */
+    "IRP_MJ_WRITE",                  /* 0x04 */
+    "IRP_MJ_QUERY_INFORMATION",      /* 0x05 */
+    "IRP_MJ_SET_INFORMATION",        /* 0x06 */
+    "IRP_MJ_QUERY_EA",               /* 0x07 */
+    "IRP_MJ_SET_EA",                 /* 0x08 */
+    "IRP_MJ_FLUSH_BUFFERS",          /* 0x09 */
+    "IRP_MJ_QUERY_VOLUME_INFORMATION",/* 0x0A */
+    "IRP_MJ_SET_VOLUME_INFORMATION", /* 0x0B */
+    "IRP_MJ_DIRECTORY_CONTROL",      /* 0x0C */
+    "IRP_MJ_FILE_SYSTEM_CONTROL",    /* 0x0D */
+    "IRP_MJ_DEVICE_CONTROL",         /* 0x0E */
+    "IRP_MJ_INTERNAL_DEVICE_CONTROL",/* 0x0F */
+    "IRP_MJ_SHUTDOWN",               /* 0x10 */
+    "IRP_MJ_LOCK_CONTROL",           /* 0x11 */
+    "IRP_MJ_CLEANUP",                /* 0x12 */
+    "IRP_MJ_CREATE_MAILSLOT",        /* 0x13 */
+    "IRP_MJ_QUERY_SECURITY",         /* 0x14 */
+    "IRP_MJ_SET_SECURITY",           /* 0x15 */
+    "IRP_MJ_POWER",                  /* 0x16 */
+    "IRP_MJ_SYSTEM_CONTROL",         /* 0x17 */
+    "IRP_MJ_DEVICE_CHANGE",          /* 0x18 */
+    "IRP_MJ_QUERY_QUOTA",            /* 0x19 */
+    "IRP_MJ_SET_QUOTA",              /* 0x1A */
+    "IRP_MJ_PNP",                    /* 0x1B */
+};
+#define IRP_TABLE_SIZE ((int)(sizeof(irp_name_table)/sizeof(irp_name_table[0])))
+
+int windows_collect_driver_irps(const char *image_path, WinKernelData *kd)
+{
+    kd->driver_irps      = NULL;
+    kd->driver_irp_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.driverirp.DriverIrp", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.driverirp] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    IrpRecord *irps = calloc(res->row_count + 1, sizeof(IrpRecord));
+    if (!irps) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        IrpRecord *irp = &irps[r];
+
+        safe_copy(irp->driver_name, sizeof(irp->driver_name),
+                  row_get(res, &res->rows[r], "Driver Name"));
+        safe_copy(irp->driver_path, sizeof(irp->driver_path),
+                  row_get(res, &res->rows[r], "Driver Path"));
+
+        /* IRP index */
+        const char *idx_str = row_get(res, &res->rows[r], "IRP");
+        irp->irp_index = (uint32_t)parse_u64(idx_str);
+
+        /* Resolve IRP name from index */
+        if (irp->irp_index < (uint32_t)IRP_TABLE_SIZE)
+            safe_copy(irp->irp_name, sizeof(irp->irp_name),
+                      irp_name_table[irp->irp_index]);
+        else
+            snprintf(irp->irp_name, sizeof(irp->irp_name),
+                     "IRP_MJ_0x%02X", irp->irp_index);
+
+        irp->handler_addr = parse_u64(
+            row_get(res, &res->rows[r], "Address"));
+        safe_copy(irp->handler_module, sizeof(irp->handler_module),
+                  row_get(res, &res->rows[r], "Module"));
+
+        /* Hooked: volatility3 marks it in the "Hooked" or "Symbol" column */
+        const char *hooked_col = row_get(res, &res->rows[r], "Hooked");
+        irp->hooked = (strcmp(hooked_col, "True") == 0 ||
+                       strcmp(hooked_col, "true") == 0 ||
+                       strcmp(hooked_col, "1") == 0);
+    }
+
+    kd->driver_irps      = irps;
+    kd->driver_irp_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_unloaded_modules                                    */
+/*  (windows.unloadedmodules.UnloadedModules)                           */
+/* ------------------------------------------------------------------ */
+int windows_collect_unloaded_modules(const char *image_path, WinKernelData *kd)
+{
+    kd->unloaded_modules      = NULL;
+    kd->unloaded_module_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.unloadedmodules.UnloadedModules", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.unloadedmodules] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    UnloadedModuleRecord *mods = calloc(res->row_count + 1,
+                                        sizeof(UnloadedModuleRecord));
+    if (!mods) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        UnloadedModuleRecord *m = &mods[r];
+        safe_copy(m->name, sizeof(m->name),
+                  row_get(res, &res->rows[r], "Name"));
+        m->start_addr = parse_u64(row_get(res, &res->rows[r], "StartAddress"));
+        m->end_addr   = parse_u64(row_get(res, &res->rows[r], "EndAddress"));
+        safe_copy(m->unload_time, sizeof(m->unload_time),
+                  row_get(res, &res->rows[r], "Time"));
+    }
+
+    kd->unloaded_modules      = mods;
+    kd->unloaded_module_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_callbacks  (windows.callbacks.Callbacks)           */
+/* ------------------------------------------------------------------ */
+int windows_collect_callbacks(const char *image_path, WinKernelData *kd)
+{
+    kd->callbacks      = NULL;
+    kd->callback_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.callbacks.Callbacks", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.callbacks] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    CallbackRecord *cbs = calloc(res->row_count + 1, sizeof(CallbackRecord));
+    if (!cbs) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        CallbackRecord *cb = &cbs[r];
+
+        safe_copy(cb->callback_type, sizeof(cb->callback_type),
+                  row_get(res, &res->rows[r], "Type"));
+        cb->callback_addr = parse_u64(
+            row_get(res, &res->rows[r], "Callback"));
+        safe_copy(cb->module, sizeof(cb->module),
+                  row_get(res, &res->rows[r], "Module"));
+        safe_copy(cb->symbol, sizeof(cb->symbol),
+                  row_get(res, &res->rows[r], "Symbol"));
+        /* Detail: combine component + detail columns if present */
+        const char *component = row_get(res, &res->rows[r], "Component");
+        const char *detail    = row_get(res, &res->rows[r], "Detail");
+        if (strcmp(component, "N/A") != 0 && strcmp(detail, "N/A") != 0)
+            snprintf(cb->detail, sizeof(cb->detail),
+                     "%s: %s", component, detail);
+        else if (strcmp(component, "N/A") != 0)
+            safe_copy(cb->detail, sizeof(cb->detail), component);
+        else
+            safe_copy(cb->detail, sizeof(cb->detail), detail);
+    }
+
+    kd->callbacks      = cbs;
+    kd->callback_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_timers  (windows.timers.Timers)                    */
+/* ------------------------------------------------------------------ */
+int windows_collect_timers(const char *image_path, WinKernelData *kd)
+{
+    kd->timers      = NULL;
+    kd->timer_count = 0;
+
+    PluginResult *res = pybridge_run_plugin(
+        image_path, "windows.timers.Timers", NULL);
+    if (!res || res->error) {
+        if (res) {
+            fprintf(stderr, "[windows.timers] %s\n", res->error);
+            pybridge_free_result(res);
+        }
+        return -1;
+    }
+
+    TimerRecord *timers = calloc(res->row_count + 1, sizeof(TimerRecord));
+    if (!timers) { pybridge_free_result(res); return -1; }
+
+    for (int r = 0; r < res->row_count; r++) {
+        TimerRecord *t = &timers[r];
+
+        t->offset       = parse_u64(row_get(res, &res->rows[r], "Offset"));
+        t->due_time     = parse_u64(row_get(res, &res->rows[r], "DueTime"));
+        t->period       = parse_u64(row_get(res, &res->rows[r], "Period"));
+        t->signaled     = parse_u64(row_get(res, &res->rows[r], "Signaled"));
+        t->routine_addr = parse_u64(row_get(res, &res->rows[r], "Routine"));
+        safe_copy(t->routine_module, sizeof(t->routine_module),
+                  row_get(res, &res->rows[r], "Module"));
+        safe_copy(t->routine_symbol, sizeof(t->routine_symbol),
+                  row_get(res, &res->rows[r], "Symbol"));
+    }
+
+    kd->timers      = timers;
+    kd->timer_count = res->row_count;
+    pybridge_free_result(res);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  windows_collect_kernel_data  (aggregates all 11 above)             */
 /* ------------------------------------------------------------------ */
 int windows_collect_kernel_data(const char *image_path, WinKernelData *kd)
 {
@@ -1052,6 +1332,11 @@ int windows_collect_kernel_data(const char *image_path, WinKernelData *kd)
 
     windows_collect_os_info(image_path, kd);
     windows_collect_loaded_modules(image_path, kd);
+    windows_collect_module_dumps(image_path, kd, NULL);  /* NULL = default dir */
+    windows_collect_driver_irps(image_path, kd);
+    windows_collect_unloaded_modules(image_path, kd);
+    windows_collect_callbacks(image_path, kd);
+    windows_collect_timers(image_path, kd);
     windows_collect_big_pools(image_path, kd);
     windows_collect_memory_map(image_path, kd);
     windows_collect_statistics(image_path, kd);

@@ -17,10 +17,14 @@ Supported plugins (Windows):
     windows.psxview.PsXView         cross-view process detection
     windows.netscan.NetScan         network scan
     windows.netstat.NetStat         network stat
-    windows.modules.Modules         loaded modules
+    windows.modules.Modules         loaded modules (+ --dump for extraction)
     windows.modscan.ModScan         module scan
     windows.driverscan.DriverScan   driver scan
     windows.drivermodule.DriverModule driver anomalies
+    windows.driverirp.DriverIrp     IRP dispatch routine table / IRP hooks
+    windows.unloadedmodules.UnloadedModules previously unloaded drivers
+    windows.callbacks.Callbacks     kernel notification callbacks
+    windows.timers.Timers           KTIMER objects / DPC routines
     windows.ssdt.SSDT               SSDT hooks
     windows.hollowprocesses.HollowProcesses process hollowing
     windows.bigpools.BigPools       large kernel pool allocations
@@ -153,6 +157,33 @@ COLUMN_ALIASES = {
     "Dest Addr":         "Dest Addr",
     "Dest Port":         "Dest Port",
     "Sock Offset":       "Sock Offset",
+
+    # windows.driverirp.DriverIrp
+    "Driver Name":       "Driver Name",
+    "Driver Path":       "Driver Path",
+    "IRP":               "IRP",
+    "Address":           "Address",
+    "Hooked":            "Hooked",
+
+    # windows.unloadedmodules.UnloadedModules
+    "StartAddress":      "StartAddress",
+    "EndAddress":        "EndAddress",
+    "Time":              "Time",
+
+    # windows.callbacks.Callbacks
+    "Callback":          "Callback",
+    "Component":         "Component",
+    "Detail":            "Detail",
+
+    # windows.timers.Timers
+    "DueTime":           "DueTime",
+    "Period":            "Period",
+    "Signaled":          "Signaled",
+    "Routine":           "Routine",
+
+    # windows.modules.Modules --dump
+    "Dump":              "Dump",
+    "File output":       "File output",
 }
 
 

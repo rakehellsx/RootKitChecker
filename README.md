@@ -30,7 +30,12 @@
 | JSON 字段 | Volatility3 插件 | 说明 |
 |---|---|---|
 | `os_info` | `windows.info.Info` | 系统版本、内核基址、KDBG 结构 |
-| `loaded_modules` | `windows.modules.Modules` | 已加载驱动完整列表（名称、基址、大小、路径） |
+| `loaded_modules` | `windows.modules.Modules` | 遍历 `PsLoadedModuleList`，列出 ntoskrnl.exe、驱动、HAL 等完整列表 |
+| `module_dumps` | `windows.modules.Modules --dump` | 提取内核驱动 `.sys` 文件到本地，用于后续静态分析（含 dump_ok 标志） |
+| `driver_irps` | `windows.driverirp.DriverIrp` | 解析 `DRIVER_OBJECT->MajorFunction` 数组，检测 IRP Hook（28 个 IRP 名称自动映射） |
+| `unloaded_modules` | `windows.unloadedmodules.UnloadedModules` | 提取 `PsUnloadedDriversList`，发现曾加载后卸载的恶意驱动（含卸载时间戳） |
+| `callbacks` | `windows.callbacks.Callbacks` | 枚举 CreateProcessNotifyRoutine、CreateThreadNotifyRoutine、LoadImageNotifyRoutine、RegistryCallback 等内核回调 |
+| `timers` | `windows.timers.Timers` | 解析 `KTIMER` 对象，检测 Rootkit 使用的内核定时器（含 DPC 例程地址和所属模块） |
 | `big_pools` | `windows.bigpools.BigPools` | 内核大页池分配，可疑 Tag 自动标记（Rootkit 常分配大页隐藏代码） |
 | `memory_map` | `windows.memmap.Memmap` | 内核虚拟地址映射（System PID=0） |
 | `statistics` | `windows.statistics.Statistics` | 内存统计摘要（页面计数、大小） |
